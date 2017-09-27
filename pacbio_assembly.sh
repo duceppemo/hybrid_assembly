@@ -25,7 +25,7 @@ version="0.1"
 
 
 # Assembly name
-prefix="CFF_Turbo"
+prefix="CFF_09A980"
 genus="Campylobacter"
 species="fetus"
 
@@ -35,12 +35,12 @@ baseDir=""${HOME}"/analyses/pacbio_test/"$prefix""
 # Pacbio raw image files location
 # Point to where the ".metada.xml" file is located
 # A subdirectory named "Analysis_Results" containing the associated ".bas.h5" and ".bax.h5" file must be present
-raw_data="/home/smrtanalysis/pacbio_data/CFV/08A948"
-filtered_subreads="/media/6tb_raid10/data/campylobacter/raw_reads/olf/pacbio/CFF/CFF_Turbo.filtered_subreads.fastq.gz"
+# raw_data="/home/smrtanalysis/pacbio_data/CFV/08A948"  # for hgap
+filtered_subreads="/media/6tb_raid10/data/campylobacter/raw_reads/olf/pacbio/CFF/CFF_09A980.filtered_subreads.fastq.gz"
 
 # Illumina paired-end data
-r1="/media/6tb_raid10/data/campylobacter/raw_reads/olf/illumina/CFF/Turbo_combined_R1.fastq.gz"
-r2="/media/6tb_raid10/data/campylobacter/raw_reads/olf/illumina/CFF/Turbo_combined_R2.fastq.gz"
+r1="/media/6tb_raid10/data/campylobacter/raw_reads/olf/illumina/CFF/09A980_combined_R1.fastq.gz"
+r2="/media/6tb_raid10/data/campylobacter/raw_reads/olf/illumina/CFF/09A980_combined_R2.fastq.gz"
 
 # Database to use for metagomic analysis of raw data (contamination)
 # db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
@@ -53,7 +53,7 @@ picard=""${prog}"/picard-tools/picard.jar"
 
 # Maximum number of cores used per sample for parallel processing
 # A highier value reduces the memory footprint.
-maxProc=6
+# maxProc=6
 
 #genome size (g|m|k)
 size="2m"
@@ -221,14 +221,11 @@ fi
 
 #Picard tool
 
+#Circlator
 
+#Prokka
 
-
-# # Check if Analysis_Results exists
-# if [ $(ls "$fast5" | wc -l) -eq 0 ]; then
-#     echo "No .fast5 files are present in the provided data folder"
-#     exit 1
-# fi
+#Mauve
 
 
 #############
@@ -581,8 +578,9 @@ echo ""$prefix" closest genome is "$(basename "${closest%.*}")" with a score of 
 # Use Mauve in batch mode to order contigs with closest genome
 [ -s "${closest%.gz}" ] || pigz -d -k "$closest"  # decompress if not present
 
+#Run both mauve and circlator?
 
-if [ $(cat "$polished"/"${prefix}"_pilon.fasta | grep -Ec "^>") -gt 1 ]; then
+if [ $(cat "$polished"/"${prefix}"_pilon.fasta | grep -Ec "^>") -gt 1 ] && [[ -z $(cat "${baseDir}"/"${prefix}".blastn | grep -i "plasmid") ]]; then
     java "$memJava" -cp "${prog}"/mauve_snapshot_2015-02-13/Mauve.jar \
         org.gel.mauve.contigs.ContigOrderer \
         -output "${ordered}"/mauve \
@@ -608,12 +606,11 @@ if [ $(cat "$polished"/"${prefix}"_pilon.fasta | grep -Ec "^>") -gt 1 ]; then
         "${ordered}"/"${prefix}"_ordered.fasta
 
     # View alignemnt with mauve
-    "${prog}"/mauve_snapshot_2015-02-13/./Mauve
+    # "${prog}"/mauve_snapshot_2015-02-13/./Mauve
 
 else
     # accession number of the closest match
     acc=$(cut -d "_" -f 1,2 <<< $(basename "$closest"))
-                | efilter -feature cds -query "dnaA" \
     
     # get all CDS from closest match
     esearch -db nucleotide -query "$acc" \
