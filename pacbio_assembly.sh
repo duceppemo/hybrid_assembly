@@ -470,7 +470,7 @@ samtools sort -@ "$cpu" -m 10G \
 samtools index "${polished}"/"${prefix}"_merged_sorted.bam
 
 #Align unmerged
-bwa mem -t "$cpu" -r 1 -a -M "${polished}"/"${prefix}"_racon.fasta "$mu1" "$mu2" | \
+bwa mem -x intractg -t "$cpu" -r 1 -a -M "${polished}"/"${prefix}"_racon.fasta "$mu1" "$mu2" | \
     samtools view -@ "$cpu" -b -h -F 4 - | \
     samtools sort -@ "$cpu"  -m 10G -o "${polished}"/"${prefix}"_unmerged.bam -
 
