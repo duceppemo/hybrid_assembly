@@ -25,23 +25,21 @@ version="0.1"
 
 
 # Assembly name
-prefix="MBWGS091"
+prefix="16-389"
 genus="Mycobacterium"
 species="bovis"
+gram="pos"
 
 # Analysis folder
 baseDir=""${HOME}"/Desktop/Mbovis_canu/"$prefix""
 
-# Pacbio raw image files location
-# Point to where the ".metada.xml" file is located
-# A subdirectory named "Analysis_Results" containing the associated ".bas.h5" and ".bax.h5" file must be present
-# raw_data="/home/smrtanalysis/pacbio_data/CFV/08A948"  # for hgap
-filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS091/MBWGS091.filtered_subreads.longest.fastq.gz"
-ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS091/MBWGS091.ccs.fastq.gz"
+# Pacbio reads
+filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/Culture_16_389/Culture_16_389.filtered_subreads.longest.fastq.gz"
+ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/Culture_16_389/Culture_16_389.ccs.fastq.gz"
 
 # Illumina paired-end data
-r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS091_R1.fastq.gz"
-r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS091_R2.fastq.gz"
+r1="/media/6tb_raid10/data/Mbovis/canada/illumina/2016_outbreak/16-389_R1.fastq.gz"
+r2="/media/6tb_raid10/data/Mbovis/canada/illumina/2016_outbreak/16-389_R2.fastq.gz"
 
 # Database to use for metagomic analysis of raw data (contamination)
 # db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
@@ -57,8 +55,8 @@ size="4350k"
 # For SPAdes
 kmer="21,33,55,77,99,127"
 
-
-smallest_contig=200
+# For assembly trimming
+smallest_contig=1000
 
 
 ######################
@@ -264,6 +262,21 @@ clumpify.sh "$memJava" \
     ziplevel=9 \
     2> >(tee -a "${logs}"/clumpify.txt)
 
+#Do it for pacbio reads too?
+clumpify.sh "$memJava" \
+    in="$ccs_reads" \
+    out="${fastq}"/"${prefix}"_ccs.fastq.gz \
+    reorder \
+    ziplevel=9 \
+    2> >(tee -a "${logs}"/clumpify_ccs.txt)
+
+clumpify.sh "$memJava" \
+    in="$filtered_subreads" \
+    out="${fastq}"/"${prefix}"_subreads.fastq.gz \
+    reorder \
+    ziplevel=9 \
+    2> >(tee -a "${logs}"/clumpify_subreads.txt)
+
 
 ############
 #          #
@@ -276,16 +289,16 @@ clumpify.sh "$memJava" \
 # TODO
 
 
-####################
-#                  #
-#   FastQc - Raw   #
-#                  #
-####################
+################
+#              #
+#   QC - Raw   #
+#              #
+################
 
 
 # Create folder to store report
 [ -d "${qc}"/fastqc/pacbio ] || mkdir -p "${qc}"/fastqc/pacbio
-[ -d "${qc}"/fastqc/fastq ] || mkdir -p "${qc}"/fastqc/fastq
+[ -d "${qc}"/fastqc/illumina ] || mkdir -p "${qc}"/fastqc/illumina
 
 echo "Running FastQC on PacBio reads..."
 
@@ -294,14 +307,14 @@ fastqc \
     --o  "${qc}"/fastqc/pacbio \
     --noextract \
     --threads "$cpu" \
-    "$filtered_subreads" \
-    "$ccs_reads"
+    "${fastq}"/"${prefix}"_ccs.fastq.gz \
+    "${fastq}"/"${prefix}"_subreads.fastq.gz
 
 echo "Running FastQC on Illumina reads..."
 
 # Run fastQC on fastq reads
 fastqc \
-    --o  "${qc}"/fastqc/fastq \
+    --o  "${qc}"/fastqc/illumina \
     --noextract \
     --threads "$cpu" \
     "${fastq}"/"${prefix}"_R1.fastq.gz \
@@ -361,87 +374,28 @@ cat "${qc}"/centrifuge/"${prefix}".tsv | \
 firefox file://"${qc}"/centrifuge/"${prefix}".html &
 
 
-##############
-#            #
-#   PacBio   #
-#            #
-##############
+###########################
+#                         #
+#   Read Pre-Processing   #
+#                         #
+###########################
 
 
-#subread trimming
-removesmartbell.sh "$memJava" \
-    in="$filtered_subreads" \
-    out="${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
-    split=t \
-    &> >(tee "${logs}"/subreads_trimming.txt)
+# Illumina
 
-#CCS trimming
-removesmartbell.sh "$memJava" \
-    in="$ccs_reads" \
-    out="${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
-    split=t \
-    &> >(tee "${logs}"/ccs_trimming.txt)
-
-#de novo assembly
-echo "De novo assembly of PacBio reads using canu..."
-canu \
-    -p "$prefix" \
-    -d "$assemblies" \
-    genomeSize="$size" \
-    -pacbio-raw "${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz
-
-# Polish assembly with racon
-echo "Mapping pacbio reads onto canu contigs using minimap..."
-minimap \
-    -t "$cpu" \
-    "${assemblies}"/"${prefix}".unitigs.fasta \
-    "${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
-    > "${polished}"/"${prefix}"_minimap_overlaps.paf
-
-echo "Correcting contigs using racon..."
-racon \
-    -t "$cpu" \
-    "${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
-    "${polished}"/"${prefix}"_minimap_overlaps.paf \
-    "${assemblies}"/"${prefix}".unitigs.fasta \
-    "${polished}"/"${prefix}"_racon.fasta
-
-genome=""${polished}"/"${prefix}"_racon.fasta"
-
-# Index contigs
-echo "Indexing genome for bwa..."
-bwa index "$genome" # genome assembly polished by racon
-
-
-################
-#              #
-#   Illumina   #
-#              #
-################
-
-
-# Illumina reads are used to polish the PacBio de novo assembly
-# They are then used for a new de novo assembly with SPAdes,
-# using the PacBio assembly as template for scaffolding (--trusted-contigs)
-# PacBio longest subreads are also used for scaffolding
-# PacBio Circular Consensus Sequences (CCS) are used as single-end reads for the assembly
-
-# The best assembly between Canu/Racon/Pilon and SPAdes is kept.
-
-
-####################
-#                  #
-#     Trimming     #
-#                  #
-####################
-
-
-echo -e "Quality trimming Illumina paired-end reads..."
-
-bbduk.sh "$memJava" \
+#Removing low-quality regions
+filterbytile.sh "$memJava" \
     in="${fastq}"/"${prefix}"_R1.fastq.gz \
     in2="${fastq}"/"${prefix}"_R2.fastq.gz \
-    ref="${prog}"/bbmap/resources/nextera.fa.gz \
+    out="${trimmed}"/"${prefix}"_Filtered_1P.fastq.gz \
+    out2="${trimmed}"/"${prefix}"_Filtered_2P.fastq.gz \
+    2> >(tee "${logs}"/illumina_tile_filtering.txt)
+
+#Quality trimming and adapter trimming"
+bbduk.sh "$memJava" \
+    in="${trimmed}"/"${prefix}"_Filtered_1P.fastq.gz \
+    in2="${trimmed}"/"${prefix}"_Filtered_2P.fastq.gz \
+    ref="${prog}"/bbmap/resources/adapters.fa \
     ktrim=r k=23 mink=11 hdist=1 tbo tpe \
     qtrim=lr trimq=10 \
     minlen=64 \
@@ -451,159 +405,343 @@ bbduk.sh "$memJava" \
     ordered=t \
     2> >(tee "${logs}"/illumina_trimming.txt)
 
-
-#############################
-#                           #
-#   Read Error Correction   #
-#                           #
-#############################
-
-
-echo -e "Illumina paired-end reads error correction..."
-
-tadpole.sh "$memJava" \
+#Removing synthetic artifacts and spike-ins
+bbduk.sh "$memJava" \
     in="${trimmed}"/"${prefix}"_Trimmed_1P.fastq.gz \
     in2="${trimmed}"/"${prefix}"_Trimmed_2P.fastq.gz \
-    out="${corrected}"/"${prefix}"_Corrected_1P.fastq.gz \
-    out2="${corrected}"/"${prefix}"_Corrected_2P.fastq.gz \
+    ref="${prog}"/bbmap/resources/sequencing_artifacts.fa.gz,"${prog}"/bbmap/resources/phix174_ill.ref.fa.gz \
+    k=31 \
+    out="${trimmed}"/"${prefix}"_Cleaned_1P.fastq.gz \
+    out2="${trimmed}"/"${prefix}"_Cleaned_2P.fastq.gz \
+    ziplevel=9 \
+    ordered=t \
+    2> >(tee "${logs}"/illumina_cleaning.txt)
+
+
+#Correcting Illumina paired-end reads
+#Phase 1
+bbmerge.sh "$memJava" \
+    in="${trimmed}"/"${prefix}"_Cleaned_1P.fastq.gz \
+    in2="${trimmed}"/"${prefix}"_Cleaned_2P.fastq.gz \
+    out="${corrected}"/"${prefix}"_Cor1_1P.fastq.gz \
+    out2="${corrected}"/"${prefix}"_Cor1_2P.fastq.gz \
+    ecco=t \
+    mix=t \
+    verystrict=t \
+    ordered=t \
+    ziplevel=9 \
+    ordered ihist="${logs}"/illumina_ihist_corr_merge.txt \
+    2> >(tee "${logs}"/illumina_corr_merging.txt)
+
+#Phase2
+clumpify.sh "$memJava" \
+    in="${corrected}"/"${prefix}"_Cor1_1P.fastq.gz \
+    in2="${corrected}"/"${prefix}"_Cor1_2P.fastq.gz \
+    out="${corrected}"/"${prefix}"_Cor2_1P.fastq.gz \
+    out2="${corrected}"/"${prefix}"_Cor2_2P.fastq.gz \
+    ecc=t \
+    passes=4 \
+    reorder=t \
+    ziplevel=9 \
+    2> >(tee "${logs}"/illumina_corr_clumpify.txt)
+
+#Phase3
+tadpole.sh "$memJava" \
+    in="${corrected}"/"${prefix}"_Cor2_1P.fastq.gz \
+    in2="${corrected}"/"${prefix}"_Cor2_2P.fastq.gz \
+    out="${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
+    out2="${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
+    ecc=t \
+    k=62 \
     threads="$cpu" \
     mode=correct \
-    2> >(tee "${logs}"/illumin_correction.txt)
+    2> >(tee "${logs}"/illumina_corr_tadpol.txt)
 
-
-##########################
-#                        #
-#   Read normalization   #
-#                        #
-##########################
-
-
-echo -e "Quality trimming Illumina paired-end reads..."
-
-bbnorm.sh "$memJava" \
-    in="${corrected}"/"${prefix}"_Corrected_1P.fastq.gz \
-    in2="${corrected}"/"${prefix}"_Corrected_2P.fastq.gz \
-    out="${normalized}"/"${prefix}"_Normalized_1P.fastq.gz \
-    out2="${normalized}"/"${prefix}"_Normalized_2P.fastq.gz \
-    threads="$cpu" \
-    2> >(tee "${logs}"/illumina_normalization.txt)
-
-
-###################
-#                 #
-#     Merging     #
-#                 #
-###################
-
-
-echo -e "Merging Illumina paried-end reads..."
-
-bbmerge.sh "$memJava" \
-    in="${normalized}"/"${prefix}"_Normalized_1P.fastq.gz \
-    in2="${normalized}"/"${prefix}"_Normalized_2P.fastq.gz \
+#Merging Illumina overlapping paried-end reads
+bbmerge-auto.sh "$memJava" \
+    in="${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
+    in2="${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
     out="${merged}"/"${prefix}"_merged.fastq.gz \
     outu="${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
     outu2="${merged}"/"${prefix}"_unmerged_2P.fastq.gz \
+    strict=t \
+    k=93 \
+    extend2=80 \
+    rem=t \
+    ordered=t \
+    ziplevel=9 \
+    ihist="${logs}"/illumina_ihist_merge.txt \
+    2> >(tee "${logs}"/illumina_merge.txt)
+
+
+#PacBio
+
+#CCS trimming
+removesmartbell.sh "$memJava" \
+    in="$ccs_reads" \
+    out="${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
+    split=t \
+    &> >(tee "${logs}"/ccs_trimming.txt)
+
+#subread trimming
+removesmartbell.sh "$memJava" \
+    in="$filtered_subreads" \
+    out="${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
+    split=t \
+    &> >(tee "${logs}"/subreads_trimming.txt)
+
+#Remove internal control from pacbio data
+bbduk.sh "$memJava" \
+    in="${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
+    ref=/media/6tb_raid10/ref/MG495226.1.fasta \
+    k=31 \
+    out="${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
     ziplevel=9 \
     ordered=t \
-    2> >(tee "${logs}"/illumina_merging.txt)
+    2> >(tee "${logs}"/pacbio_ccs_cleaning.txt)
+
+bbduk.sh "$memJava" \
+    in="${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
+    ref=/media/6tb_raid10/ref/MG495226.1.fasta \
+    k=31 \
+    out="${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
+    ziplevel=9 \
+    ordered=t \
+    2> >(tee "${logs}"/pacbio_subreads_cleaning.txt)
+
+#subread hybrid error correction
+pigz -dk "${merged}"/"${prefix}"_merged.fastq.gz \
+    "${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
+    "${merged}"/"${prefix}"_unmerged_2P.fastq.gz
+
+#7H30 to run
+perl "${prog}"/proovread/bin/proovread \
+    -l "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
+    -s "${merged}"/"${prefix}"_merged.fastq \
+    -s "${merged}"/"${prefix}"_unmerged_1P.fastq \
+    -s "${merged}"/"${prefix}"_unmerged_2P.fastq \
+    -t "$cpu" \
+    -p "${corrected}"/"${prefix}"_subreads_Corrected
+
+rm "${merged}"/"${prefix}"_merged.fastq \
+    "${merged}"/"${prefix}"_unmerged_1P.fastq \
+    "${merged}"/"${prefix}"_unmerged_2P.fastq
+
+mv "${corrected}"/"${prefix}"_subreads_Corrected/"${prefix}"_subreads_Corrected.trimmed.fq \
+    "${corrected}"/"${prefix}"_subreads_Corrected.fastq
+
+pigz "${corrected}"/"${prefix}"_subreads_Corrected.fastq
+
+rm -rf "${corrected}"/"${prefix}"_subreads_Corrected
+
+
+#self-correction?
+
+
+
+################
+#              #
+#   Assembly   #
+#              #
+################
+
+
+#de novo assembly
+echo "De novo assembly of PacBio reads using canu..."
+canu \
+    -p "$prefix" \
+    -d "$assemblies" \
+    genomeSize="$size" \
+    -pacbio-corrected "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz
 
 
 #######################
 #                     #
-#      Alignment      #
+#      Polishing      #
 #                     #
 ####################### 
 
 
-echo "Mapping Illumina reads on PacBio corrected assembly..."
-
-#unmerged
-mu1=$(find "$merged" -type f -name "*_1P.fastq.gz")
-mu2=$(sed "s/_1P/_2P/" <<< "$mu1")
-
-#merged
-m=$(find "$merged" -type f -name "*merged.fastq.gz")
-
-#Align merged
-bwa mem -t "$cpu" -r 1 -a -M "$genome" "$m" | \
-    samtools view -@ "$cpu" -b -h -F 4 - | \
-    samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_merged.bam -
-
-# remove duplicates for sinle-end reads
-samtools rmdup \
-    -s \
-    "${polished}"/"${prefix}"_merged.bam \
-    "${polished}"/"${prefix}"_merged_nodup.bam
-
-# Merge and sort all merged files
-samtools sort -@ "$cpu" -m 10G \
-    -o "${polished}"/"${prefix}"_merged_sorted.bam \
-    "${polished}"/"${prefix}"_merged_nodup.bam
-
-# index bam file
-samtools index "${polished}"/"${prefix}"_merged_sorted.bam
-
-#Align unmerged
-bwa mem -t "$cpu" -r 1 -a -M "${polished}"/"${prefix}"_racon.fasta "$mu1" "$mu2" | \
-    samtools view -@ "$cpu" -b -h -F 4 - | \
-    samtools sort -@ "$cpu"  -m 10G -o "${polished}"/"${prefix}"_unmerged.bam -
-
-samtools rmdup \
-    "${polished}"/"${prefix}"_unmerged.bam \
-    "${polished}"/"${prefix}"_unmerged_nodup.bam
-
-# Merge and sort all merged files
-samtools sort -@ "$cpu" -m 10G \
-    -o "${polished}"/"${prefix}"_unmerged_sorted.bam \
-    "${polished}"/"${prefix}"_unmerged_nodup.bam
-
-samtools index "${polished}"/"${prefix}"_unmerged_sorted.bam
-
-#Align pacbio CCS reads
-bwa mem -t "$cpu" -r 1 -a -M "$genome" "${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz | \
-    samtools view -@ "$cpu" -b -h -F 4 - | \
-    samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_ccs.bam -
-samtools rmdup -s "${polished}"/"${prefix}"_ccs.bam "${polished}"/"${prefix}"_ccs_nodup.bam
-samtools sort -@ "$cpu" -m 10G \
-    -o "${polished}"/"${prefix}"_ccs_sorted.bam \
-    "${polished}"/"${prefix}"_ccs_nodup.bam
-samtools index "${polished}"/"${prefix}"_ccs_sorted.bam
-
-#Correct contigs using pilon based on the Illumina reads
-# java "$memJava" -XX:+UseConcMarkSweepGC -XX:-UseGCOverheadLimit \
-java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar \
-    --threads "$cpu" \
-    --genome "${polished}"/"${prefix}"_racon.fasta \
-    --unpaired "${polished}"/"${prefix}"_merged_sorted.bam \
-    --unpaired "${polished}"/"${prefix}"_ccs_sorted.bam \
-    --frags "${polished}"/"${prefix}"_unmerged_sorted.bam \
-    --outdir "$polished" \
-    --output "${prefix}"_pilon \
-    --changes
-
-#Cleanup
-find "$polished" -type f ! -name "*pilon*"  ! -name "*racon*" -exec rm {} \;
-
-#Blast on nt
-blastn \
-    -db nt \
-    -query "${polished}"/"${prefix}"_pilon.fasta \
-    -out "${baseDir}"/"${prefix}".blastn.tsv \
-    -evalue "1e-10" \
-    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
-    -num_threads "$cpu" \
-    -max_target_seqs 1
-
-#add header to blast file
-echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
-    > "${baseDir}"/tmp.txt
-cat "${baseDir}"/"${prefix}".blastn.tsv >> "${baseDir}"/tmp.txt
-mv "${baseDir}"/tmp.txt "${baseDir}"/"${prefix}".blastn.tsv
+# Illumina reads are used to polish the PacBio de novo assembly
+# They are then used for a new de novo assembly with SPAdes,
+# using the polished PacBio assembly as template for scaffolding (--trusted-contigs)
+# PacBio longest subreads are also used for scaffolding
+# PacBio Circular Consensus Sequences (CCS) are used as single-end reads for the assembly
 
 
-#Maybe add previous assembly as trusted contigs:
-# --trusted-contigs "${polished}"/"${prefix}"_pilon.fasta
+# Disabled because it introduces too many indels in the assembly
+# # Polish assembly with racon
+# echo "Mapping PacBio reads onto canu contigs using minimap..."
+# minimap \
+#     -t "$cpu" \
+#     "${assemblies}"/"${prefix}".unitigs.fasta \
+#     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
+#     > "${polished}"/"${prefix}"_minimap_overlaps.paf
+
+# echo "Correcting contigs with PacBio reads using racon..."
+# racon \
+#     -t "$cpu" \
+#     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
+#     "${polished}"/"${prefix}"_minimap_overlaps.paf \
+#     "${assemblies}"/"${prefix}".unitigs.fasta \
+#     "${polished}"/"${prefix}"_racon.fasta
+
+
+# #convert fastq to fasta
+# zcat "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
+#     | sed -n '1~4s/^@/>/p;2~4p' \
+#     > "${corrected}"/"${prefix}"_subreads_Corrected.fasta
+
+# #map pacbio reads back to assembly
+# blasr \
+#    "${corrected}"/"${prefix}"_subreads_Corrected.fasta \
+#    "${assemblies}"/"${prefix}".unitigs.fasta \
+#    --nproc "$cpu" \
+#    --out "${polished}"/"${prefix}"_subreads_Corrected.sam \
+#    --bam
+
+# samtools view \
+#     -@ "$cpu" \
+#     -b -h \
+#     -T "${assemblies}"/"${prefix}".unitigs.fasta \
+#     "${polished}"/"${prefix}"_subreads_Corrected.sam \
+#     > "${polished}"/"${prefix}"_subreads_Corrected.bam
+
+# bamtools sort \
+#     -in "${polished}"/"${prefix}"_subreads_Corrected.bam \
+#     -out "${polished}"/"${prefix}"_subreads_sorted.bam
+
+# bamtools index \
+#     -in "${polished}"/"${prefix}"_subreads_sorted.bam
+
+# source activate quiver
+
+# quiver \
+#     -j "$cpu" \
+#     -r "${assemblies}"/"${prefix}".unitigs.fasta \
+#     -o "${polished}"/"${prefix}"_quiver.fasta \
+#     "${polished}"/"${prefix}"_subreads_sorted.bam
+
+# source deactivate
+
+
+function Polish()
+{
+    # Index genome
+    bwa index "$genome"
+
+    #Align merged
+    bwa mem -t "$cpu" -M "$1" "$m" | \
+        samtools view -@ "$cpu" -b -h -F 4 - | \
+        samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_merged.bam -
+
+    samtools rmdup \
+        -s \
+        "${polished}"/"${prefix}"_merged.bam \
+        "${polished}"/"${prefix}"_merged_nodup.bam
+
+    samtools sort -@ "$cpu" -m 10G \
+        -o "${polished}"/"${prefix}"_merged_sorted.bam \
+        "${polished}"/"${prefix}"_merged_nodup.bam
+
+    rm "${polished}"/"${prefix}"_merged.bam
+    rm "${polished}"/"${prefix}"_merged_nodup.bam
+
+    samtools index "${polished}"/"${prefix}"_merged_sorted.bam
+
+
+    #Align unmerged
+    bwa mem -t "$cpu" -M "$1" "$mu1" "$mu2" | \
+        samtools view -@ "$cpu" -b -h -F 4 - | \
+        samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_unmerged.bam -
+
+    samtools rmdup \
+        "${polished}"/"${prefix}"_unmerged.bam \
+        "${polished}"/"${prefix}"_unmerged_nodup.bam
+
+    samtools sort -@ "$cpu" -m 10G \
+        -o "${polished}"/"${prefix}"_unmerged_sorted.bam \
+        "${polished}"/"${prefix}"_unmerged_nodup.bam
+
+    rm "${polished}"/"${prefix}"_unmerged.bam
+    rm "${polished}"/"${prefix}"_unmerged_nodup.bam
+
+    samtools index "${polished}"/"${prefix}"_unmerged_sorted.bam
+
+
+    #Align pacbio CCS reads
+    bwa mem -x pacbio -t "$cpu" -M "$1" "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz | \
+        samtools view -@ "$cpu" -b -h -F 4 - | \
+        samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_ccs.bam -
+
+    samtools rmdup \
+        -s "${polished}"/"${prefix}"_ccs.bam \
+        "${polished}"/"${prefix}"_ccs_nodup.bam
+
+    samtools sort -@ "$cpu" -m 10G \
+        -o "${polished}"/"${prefix}"_ccs_sorted.bam \
+        "${polished}"/"${prefix}"_ccs_nodup.bam
+
+    rm "${polished}"/"${prefix}"_ccs.bam
+    rm "${polished}"/"${prefix}"_ccs_nodup.bam
+
+    samtools index "${polished}"/"${prefix}"_ccs_sorted.bam
+
+    #Align pacbio corrected longest subreads
+    bwa mem -x pacbio -t "$cpu" -M "$1" "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz | \
+        samtools view -@ "$cpu" -b -h -F 4 - | \
+        samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_subreads_Corrected.bam -
+
+    samtools rmdup \
+        -s "${polished}"/"${prefix}"_subreads_Corrected.bam \
+        "${polished}"/"${prefix}"_subreads_Corrected_nodup.bam
+
+    samtools sort -@ "$cpu" -m 10G \
+        -o "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam \
+        "${polished}"/"${prefix}"_subreads_Corrected_nodup.bam
+
+    rm "${polished}"/"${prefix}"_subreads_Corrected.bam
+    rm "${polished}"/"${prefix}"_subreads_Corrected_nodup.bam
+
+    samtools index "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam
+
+    #Merge all bam files
+    samtools merge \
+        -@ "$cpu" \
+        - \
+        "${polished}"/"${prefix}"_merged_sorted.bam \
+        "${polished}"/"${prefix}"_unmerged_sorted.bam \
+        "${polished}"/"${prefix}"_ccs_sorted.bam \
+        "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam | \
+    samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_all.bam
+    
+    samtools index "${polished}"/"${prefix}"_all.bam
+
+    if [ "$3" != "map" ]; then
+        #Correct contigs using pilon based on the Illumina reads
+        java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar \
+            --threads "$cpu" \
+            --genome "$1" \
+            --unpaired "${polished}"/"${prefix}"_merged_sorted.bam \
+            --unpaired "${polished}"/"${prefix}"_ccs_sorted.bam \
+            --unpaired "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam \
+            --frags "${polished}"/"${prefix}"_unmerged_sorted.bam \
+            --outdir "$polished" \
+            --output "$2" \
+            --changes
+    fi
+}
+
+# Illumina reads to use for polishing
+mu1=$(find "$merged" -type f -name "*_1P.fastq.gz") #unmerged R1
+mu2=$(sed "s/_1P/_2P/" <<< "$mu1")  #unmerged R2
+m=$(find "$merged" -type f -name "*merged.fastq.gz")  # merged
+
+# 1st round of polishing
+genome="${assemblies}"/"${prefix}".unitigs.fasta  # Canu assembly
+Polish "$genome" "${prefix}"_pilon1
+genome="${polished}"/"${prefix}"_pilon1.fasta
+
 #SPAdes hybrid assembly
 spades.py \
     --only-assembler \
@@ -611,75 +749,29 @@ spades.py \
     -m "$mem" \
     -k "$kmer" \
     --careful \
-    --pacbio "${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
-    --trusted-contigs "${polished}"/"${prefix}"_pilon.fasta \
-    --s1 "${merged}"/"${prefix}"_merged.fastq.gz \
-    --pe1-1 "${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
-    --pe1-2 "${merged}"/"${prefix}"_unmerged_2P.fastq.gz \
-    --s2 "${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
+    --pacbio "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
+    --untrusted-contigs "$genome" \
+    --s1 "$m" \
+    --pe1-1 "$mu1" \
+    --pe1-2 "$mu2" \
+    --s2 "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
     -o "${polished}"/spades
 
 #copy and rename assembly
-cp "${assemblies}"/spades/scaffolds.fasta "${polished}"/"${prefix}"_spades.fasta
+cp "${polished}"/spades/scaffolds.fasta "${polished}"/"${prefix}"_spades.fasta
 
-# Check contig ID
-blastn \
-    -db nt \
-    -query "${polished}"/"${prefix}"_spades.fasta \
-    -out "${polished}"/"${prefix}"_spades.fasta.blastn.tsv \
-    -evalue "1e-10" \
-    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
-    -num_threads "$cpu" \
-    -max_target_seqs 1
+#Polish with pilon
+#Second round of Pilon correction
+genome="${polished}"/"${prefix}"_spades.fasta
+Polish "$genome" "${prefix}"_pilon2
+genome="${polished}"/"${prefix}"_pilon2.fasta
 
 
-
-#Polish with pilon?
-
-
-
-
-#map pacbio reads back to assembly
-bwa index "${polished}"/"${prefix}"_spades.fasta
-
-bwa mem -x pacbio -t "$cpu" -r 1 -a -M "${polished}"/"${prefix}"_spades.fasta "$filtered_subreads" | \
-    samtools view -@ "$cpu" -b -h - | \
-    samtools sort -@ "$cpu" -m 10G -o "${aligned}"/"${prefix}"_pacbio.bam -
-
-# remove duplicates for sinle-end reads
-samtools rmdup \
-    -s \
-    "${aligned}"/"${prefix}"_pacbio.bam \
-    "${aligned}"/"${prefix}"_pacbio_nodup.bam
-
-#remove bam with duplicates
-rm "${aligned}"/"${prefix}"_pacbio.bam
-
-#index bam file
-samtools index "${aligned}"/"${prefix}"_pacbio_nodup.bam
-
-#Visualize mapping in IGV (or genome browser of choice)
-
-
-#########################
-#                       #
-#   Assembly trimming   #
-#                       #
-#########################
-
-
-# Remove contigs smaller than X bp
-perl "${prog}"/phage_typing/removesmallscontigs.pl \
-    "$smallest_contig" \
-    "${polished}"/"${prefix}"_spades.fasta \
-    > "${polished}"/"${prefix}"_spades"${smallest_contig}".fasta
-
-
-#######################
-#                     #
-#   Contig ordering   #
-#                     #
-#######################
+###################
+#                 #
+#   Circularize   #
+#                 #
+###################
 
 
 # Folder to store refseq genomes
@@ -695,74 +787,87 @@ bash "${scripts}"/get_assemblies.sh \
 # Use mash to find closest genome from refseq
 bash "${scripts}"/findClosest.sh \
     "${ordered}"/refseq \
-    "${polished}"/spades/scaffolds.fasta \
+    "$genome" \
     "$cpu"
 
-# The closest is the top one
-closest=$(cat "${ordered}"/refseq/"${prefix}"_pilon"${smallest_contig}".distance.tsv | head -n 1 | cut -f 1)
+closest=$(cat "${ordered}"/refseq/"${prefix}"_pilon3.distance.tsv | head -n 1 | cut -f 1)  # The closest is the top one
+score=$(cat "${ordered}"/refseq/"${prefix}"_pilon3.distance.tsv | head -n 1 | cut -f 6)  #its score out of 1000
+acc=$(cut -d "_" -f 1,2 <<< $(basename "$closest"))  # accession number of the closest match
 
-#its score out of 1000
-score=$(cat "${ordered}"/refseq/"${prefix}"_pilon"${smallest_contig}".distance.tsv | head -n 1 | cut -f 6)
+echo ""$prefix" closest genome is "$(basename "${closest%.*}")" with a score of "$score"/1000" | tee -a "${logs}"/log.txt  #Add information to log
 
-#Add information to log
-echo ""$prefix" closest genome is "$(basename "${closest%.*}")" with a score of "$score"/1000" | tee -a "${logs}"/log.txt
+# get all CDS from closest match
+esearch -db nucleotide -query "$acc" \
+    | efetch -format fasta_cds_na \
+    > "${ordered}"/"${acc}"_cds.fasta
+
+#extract only the dnaA entry
+cat "${ordered}"/"${acc}"_cds.fasta \
+    | awk 'BEGIN {RS = ">"} /dnaA/ {print ">" $0}' \
+    > "${ordered}"/"${acc}"_dnaA.fasta
+
+#Cleanup
+rm "${ordered}"/"${acc}"_cds.fasta
+
+circlator all \
+    --verbose \
+    --threads "$cpu" \
+    --assembler "spades" \
+    --data_type "pacbio-corrected" \
+    --bwa_opts "-x pacbio" \
+    --b2r_discard_unmapped \
+    --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
+    "${polished}"/spades/scaffolds.fasta \
+    "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
+    "${polished}"/circlator
+
+cp "${polished}"/circlator/06.fixstart.fasta \
+    "${polished}"/"${prefix}"_circlator.fasta
+
+genome="${polished}"/"${prefix}"_circlator.fasta
+Polish "$genome" "${prefix}"_pilon3
+genome="${polished}"/"${prefix}"_pilon3.fasta
+
+
+#######################
+#                     #
+#   Contig ordering   #
+#                     #
+#######################
+
+
+[ -s "${closest%.gz}" ] || pigz -d -k "$closest" # decompress if not present
 
 # Use Mauve in batch mode to order contigs with closest genome
-[ -s "${closest%.gz}" ] || pigz -d -k "$closest"  # decompress if not present
+java "$memJava" -cp "${prog}"/mauve_snapshot_2015-02-13/Mauve.jar \
+    org.gel.mauve.contigs.ContigOrderer \
+    -output "${ordered}"/mauve \
+    -ref "${closest%.gz}" \
+    -draft "$genome"
 
-#Run both mauve and circlator?
+#fix formating of Mauve output
+#find out how many "alignment" folder there is
+n=$(find "${ordered}"/mauve -maxdepth 1 -type d | sed '1d' | wc -l)
 
-if [ $(cat "$polished"/"${prefix}"_pilon.fasta | grep -Ec "^>") -gt 1 ] && [[ -z $(cat "${baseDir}"/"${prefix}".blastn | grep -i "plasmid") ]]; then
-    java "$memJava" -cp "${prog}"/mauve_snapshot_2015-02-13/Mauve.jar \
-        org.gel.mauve.contigs.ContigOrderer \
-        -output "${ordered}"/mauve \
-        -ref "${closest%.gz}" \
-        -draft "$polished"/"${prefix}"_pilon.fasta
+# reformat with no sorting
+perl "${scripts}"/formatFasta.pl \
+    -i ""${ordered}"/mauve/alignment"${n}"/"${prefix}"_pilon3.fasta" \
+    -o "${ordered}"/"${prefix}"_ordered.fasta \
+    -w 80
 
-    #fix formating of Mauve output
-    #find out how many "alignment" folder there is
-    n=$(find "${ordered}"/mauve -maxdepth 1 -type d | sed '1d' | wc -l)
+genome="${ordered}"/"${prefix}"_ordered.fasta
 
-    # reformat with no sorting
-    perl "${scripts}"/formatFasta.pl \
-        -i "${ordered}"/mauve/alignment"${n}"/"${prefix}"_pilon.fasta \
-        -o "${ordered}"/"${prefix}"_ordered.fasta \
-        -w 80
+[ -d "${qc}"/mauve ] || mkdir -p "${qc}"/mauve
 
-    [ -d "${qc}"/mauve ] || mkdir -p "${qc}"/mauve
+#align with progessiveMauve
+"${prog}"/mauve_snapshot_2015-02-13/linux-x64/./progressiveMauve \
+    --output="${qc}"/mauve/"${prefix}"_ordered.xmfa \
+    "${closest%.gz}" \
+    "$genome"
 
-    #align with progessiveMauve
-    "${prog}"/mauve_snapshot_2015-02-13/linux-x64/./progressiveMauve \
-        --output="${qc}"/mauve/"${prefix}"_ordered.xmfa \
-        "${closest%.gz}" \
-        "${ordered}"/"${prefix}"_ordered.fasta
-
-    # View alignemnt with mauve
-    "${prog}"/mauve_snapshot_2015-02-13/./Mauve \
-        "${qc}"/mauve/"${prefix}"_ordered.xmfa &
-
-else
-    # accession number of the closest match
-    acc=$(cut -d "_" -f 1,2 <<< $(basename "$closest"))
-    
-    # get all CDS from closest match
-    esearch -db nucleotide -query "$acc" \
-        | efetch -format fasta_cds_na \
-        > "${ordered}"/"${acc}"_cds.fasta
-
-    #extract only the dnaA entry
-    cat "${ordered}"/"${acc}"_cds.fasta \
-        | awk 'BEGIN {RS = ">"} /dnaA/ {print ">" $0}' \
-        > "${ordered}"/"${acc}"_dnaA.fasta
-
-    rm "${ordered}"/"${acc}"_cds.fasta
-
-    #circlator
-    circlator fixstart \
-        --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
-        "${polished}"/"${prefix}"_pilon.fasta \
-        "${ordered}"/"${prefix}"_ordered
-fi
+# View alignemnt with mauve
+"${prog}"/mauve_snapshot_2015-02-13/./Mauve \
+    "${qc}"/mauve/"${prefix}"_ordered.xmfa &
 
 #cleanup
 rm -rf "${ordered}"/mauve
@@ -770,17 +875,55 @@ rm -rf "${ordered}"/refseq
 find "$ordered" -type f -name "*.sslist" -exec rm {} \;
 
 
-#############
-#           #
-#   QUAST   #
-#           #
-#############
+#########################
+#                       #
+#   Assembly trimming   #
+#                       #
+#########################
+
+
+# Remove contigs smaller than X bp
+perl "${prog}"/phage_typing/removesmallscontigs.pl \
+    "$smallest_contig" \
+    "$genome" \
+    > "${genome%.fasta}"_"${smallest_contig}".fasta
+
+genome="${genome%.fasta}"_"${smallest_contig}".fasta
+
+
+#################
+#               #
+#   Contig ID   #
+#               #
+#################
+
+
+blastn \
+    -db nt \
+    -query "$genome" \
+    -out "${genome%.fasta}"_"${smallest_contig}".blastn.tsv \
+    -evalue "1e-10" \
+    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
+    -num_threads "$cpu" \
+    -max_target_seqs 1
+
+echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
+    > "${polished}"/tmp.txt
+cat "${genome%.fasta}"_"${smallest_contig}".blastn.tsv >> "${polished}"/tmp.txt
+mv "${polished}"/tmp.txt "${genome%.fasta}"_"${smallest_contig}".blastn.tsv
+
+
+######################
+#                    #
+#   Assembly Stats   #
+#                    #
+######################
 
 
 quast.py \
     -o "${qc}"/quast \
     -t "$cpu" \
-    "${ordered}"/"${prefix}"_ordered.fasta
+    "$genome"
 
 
 ###################
@@ -799,10 +942,10 @@ prokka  --outdir "$annotation" \
         --genus "$genus" \
         --species "$species" \
         --strain "$prefix" \
-        --gram "neg" \
+        --gram "$gram" \
         --cpus "$cpu" \
         --rfam \
-        "${ordered}"/"${prefix}"_ordered.fasta
+        "$genome"
 
 #extract hypothetical proteins
 cat "${annotation}"/"${prefix}".faa | \
@@ -855,7 +998,7 @@ prokka  --outdir "$annotation" \
         --cpus "$cpu" \
         --rfam \
         --proteins "${annotation}"/extra_hits.fasta \
-        "${ordered}"/"${prefix}"_ordered.fasta
+        "$genome"
 
 echo -e "Number of hypothetical proteins remaining after the BLAST (1e-30): $(cat "${annotation}"/"${prefix}".faa | grep -ic "hypothetical")" \
     | tee -a "${logs}"/log.txt
