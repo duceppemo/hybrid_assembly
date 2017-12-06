@@ -790,8 +790,8 @@ bash "${scripts}"/findClosest.sh \
     "$genome" \
     "$cpu"
 
-closest=$(cat "${ordered}"/refseq/"${prefix}"_pilon3.distance.tsv | head -n 1 | cut -f 1)  # The closest is the top one
-score=$(cat "${ordered}"/refseq/"${prefix}"_pilon3.distance.tsv | head -n 1 | cut -f 6)  #its score out of 1000
+closest=$(cat "${ordered}"/refseq/"${prefix}"_pilon2.distance.tsv | head -n 1 | cut -f 1)  # The closest is the top one
+score=$(cat "${ordered}"/refseq/"${prefix}"_pilon2.distance.tsv | head -n 1 | cut -f 6)  #its score out of 1000
 acc=$(cut -d "_" -f 1,2 <<< $(basename "$closest"))  # accession number of the closest match
 
 echo ""$prefix" closest genome is "$(basename "${closest%.*}")" with a score of "$score"/1000" | tee -a "${logs}"/log.txt  #Add information to log
@@ -805,6 +805,20 @@ esearch -db nucleotide -query "$acc" \
 cat "${ordered}"/"${acc}"_cds.fasta \
     | awk 'BEGIN {RS = ">"} /dnaA/ {print ">" $0}' \
     > "${ordered}"/"${acc}"_dnaA.fasta
+
+#Check if one and only one dnaA sequence
+if [ $(cat "${ordered}"/"${acc}"_dnaA.fasta | grep -Ec "^>") -eq 0 ]; then
+    echo "No dnaA gene was found in closest genome from refseq: "$acc"" | tee -a "${logs}"/log.txt
+    # exit 1
+elif [ $(cat "${ordered}"/"${acc}"_dnaA.fasta | grep -Ec "^>") -gt 1 ]; then
+    echo "More than one dnaA gene was found in closest genome from refseq: "$acc"" | tee -a "${logs}"/log.txt
+    echo "Keeping th efirst entry only"
+
+    cat "${ordered}"/"${acc}"_dnaA.fasta | \
+        awk 'BEGIN {RS = ">"} NR > 1 {print RS $0;exit;}' \
+        > "${ordered}"/tmp.txt
+    mv "${ordered}"/tmp.txt "${ordered}"/"${acc}"_dnaA.fasta
+fi
 
 #Cleanup
 rm "${ordered}"/"${acc}"_cds.fasta
@@ -910,7 +924,7 @@ blastn \
 echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
     > "${polished}"/tmp.txt
 cat "${genome%.fasta}"_"${smallest_contig}".blastn.tsv >> "${polished}"/tmp.txt
-mv "${polished}"/tmp.txt "${genome%.fasta}"_"${smallest_contig}".blastn.tsv
+mv "${polished}"/tmp.txt "${genome%.fasta}".blastn.tsv
 
 
 ######################
