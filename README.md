@@ -10,6 +10,7 @@ Software list:
 * Centrifuge
 * Krona tools
 * Firefox
+* proovread
 * Canu
 * BBtools
 * BWA
@@ -17,13 +18,14 @@ Software list:
 * Racon
 * Minimap
 * Pilon
-* Picard tools
 * Mauve
+* SPAdes
 * Circlator
 * Prokka
 * BLAST+
 * GNU parallel
 * Entrez Direct (NCBI)
+* QUAST
 
 Other scripts:
 * formatFasta.pl
@@ -38,7 +40,7 @@ Youy need to update the "User Defined" section of the script prior running it. I
 ## Workflow
 
 1. Pacbio read quality control (QC) and taxonomic diversity analysis
-2. De nove assembly of pacbio reads.
+2. De novo assembly of pacbio reads
 3. Polishing of assembly
 4. Ordering of contig(s)
 5. QC of assembly
