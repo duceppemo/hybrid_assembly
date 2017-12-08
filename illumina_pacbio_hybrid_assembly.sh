@@ -391,7 +391,7 @@ filterbytile.sh "$memJava" \
     out2="${trimmed}"/"${prefix}"_Filtered_2P.fastq.gz \
     2> >(tee "${logs}"/illumina_tile_filtering.txt)
 
-#Quality trimming and adapter trimming"
+#Quality trimming and adapter trimming
 bbduk.sh "$memJava" \
     in="${trimmed}"/"${prefix}"_Filtered_1P.fastq.gz \
     in2="${trimmed}"/"${prefix}"_Filtered_2P.fastq.gz \
@@ -559,7 +559,7 @@ canu \
 #                     #
 #      Polishing      #
 #                     #
-####################### 
+#######################
 
 
 # Illumina reads are used to polish the PacBio de novo assembly
@@ -717,6 +717,9 @@ function Polish()
     
     samtools index "${polished}"/"${prefix}"_all.bam
 
+    g1=$(basename "$genome")
+    g2="${g1%.fasta}"
+
     if [ "$3" != "map" ]; then
         #Correct contigs using pilon based on the Illumina reads
         java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar \
@@ -728,7 +731,8 @@ function Polish()
             --frags "${polished}"/"${prefix}"_unmerged_sorted.bam \
             --outdir "$polished" \
             --output "$2" \
-            --changes
+            --changes \
+            &> >(tee "${logs}"/"${g2}".pilon)
     fi
 }
 
@@ -831,7 +835,7 @@ circlator all \
     --bwa_opts "-x pacbio" \
     --b2r_discard_unmapped \
     --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
-    "${polished}"/spades/scaffolds.fasta \
+    "$genome" \
     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
     "${polished}"/circlator
 
@@ -915,7 +919,7 @@ genome="${genome%.fasta}"_"${smallest_contig}".fasta
 blastn \
     -db nt \
     -query "$genome" \
-    -out "${genome%.fasta}"_"${smallest_contig}".blastn.tsv \
+    -out "${genome%.fasta}".blastn.tsv \
     -evalue "1e-10" \
     -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
     -num_threads "$cpu" \
@@ -923,7 +927,7 @@ blastn \
 
 echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
     > "${polished}"/tmp.txt
-cat "${genome%.fasta}"_"${smallest_contig}".blastn.tsv >> "${polished}"/tmp.txt
+cat "${genome%.fasta}".blastn.tsv >> "${polished}"/tmp.txt
 mv "${polished}"/tmp.txt "${genome%.fasta}".blastn.tsv
 
 
