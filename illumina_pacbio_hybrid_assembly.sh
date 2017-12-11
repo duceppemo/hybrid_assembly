@@ -794,11 +794,14 @@ bash "${scripts}"/findClosest.sh \
     "$genome" \
     "$cpu"
 
-closest=$(cat "${ordered}"/refseq/"${prefix}"_pilon2.distance.tsv | head -n 1 | cut -f 1)  # The closest is the top one
-score=$(cat "${ordered}"/refseq/"${prefix}"_pilon2.distance.tsv | head -n 1 | cut -f 6)  #its score out of 1000
+distance=""${ordered}"/refseq/"${prefix}"_pilon2.distance.tsv"
+closest=$(cat "$distance" | head -n 1 | cut -f 1)  # The closest is the top one
+closest_acc=$(zcat "$closest" | head -n 1 | cut -d " " -f 1 | tr -d ">")
+closest_ID=$(zcat "$closest" | head -n 1 | cut -d " " -f 2- | cut -d "," -f 1)
+score=$(cat "$distance" | head -n 1 | cut -f 6)  #its score out of 1000
 acc=$(cut -d "_" -f 1,2 <<< $(basename "$closest"))  # accession number of the closest match
 
-echo ""$prefix" closest genome is "$(basename "${closest%.*}")" with a score of "$score"/1000" | tee -a "${logs}"/log.txt  #Add information to log
+echo ""$prefix" closest genome is \""${closest_ID}" ("${closest_acc}")\" with a score of "${score}"/1000" | tee -a "${logs}"/log.txt  #Add information to log
 
 # get all CDS from closest match
 esearch -db nucleotide -query "$acc" \
@@ -831,6 +834,7 @@ circlator all \
     --verbose \
     --threads "$cpu" \
     --assembler "spades" \
+    --assemble_spades_k 127 \
     --data_type "pacbio-corrected" \
     --bwa_opts "-x pacbio" \
     --b2r_discard_unmapped \
@@ -854,30 +858,54 @@ genome="${polished}"/"${prefix}"_pilon3.fasta
 #######################
 
 
+function remove_small_contigs ()
+{
+    # Remove contigs smaller than X bp
+    perl "${prog}"/phage_typing/removesmallscontigs.pl \
+        "$smallest_contig" \
+        "$genome" \
+        > "${genome%.fasta}"_"${smallest_contig}".fasta
+
+    genome="${genome%.fasta}"_"${smallest_contig}".fasta
+}
+
+function order_contigs ()
+{
+    # Use Mauve in batch mode to order contigs with closest genome
+    java "$memJava" -cp "${prog}"/mauve_snapshot_2015-02-13/Mauve.jar \
+        org.gel.mauve.contigs.ContigOrderer \
+        -output "${ordered}"/mauve \
+        -ref "${closest%.gz}" \
+        -draft "$genome"
+
+    #fix formating of Mauve output
+    #find out how many "alignment" folder there is
+    n=$(find "${ordered}"/mauve -maxdepth 1 -type d | sed '1d' | wc -l)
+
+    # reformat with no sorting
+    perl "${scripts}"/formatFasta.pl \
+        -i ""${ordered}"/mauve/alignment"${n}"/"${prefix}"_pilon3.fasta" \
+        -o "${ordered}"/"${prefix}"_ordered.fasta \
+        -w 80
+
+    genome="${ordered}"/"${prefix}"_ordered.fasta
+}
+
 [ -s "${closest%.gz}" ] || pigz -d -k "$closest" # decompress if not present
 
-# Use Mauve in batch mode to order contigs with closest genome
-java "$memJava" -cp "${prog}"/mauve_snapshot_2015-02-13/Mauve.jar \
-    org.gel.mauve.contigs.ContigOrderer \
-    -output "${ordered}"/mauve \
-    -ref "${closest%.gz}" \
-    -draft "$genome"
-
-#fix formating of Mauve output
-#find out how many "alignment" folder there is
-n=$(find "${ordered}"/mauve -maxdepth 1 -type d | sed '1d' | wc -l)
-
-# reformat with no sorting
-perl "${scripts}"/formatFasta.pl \
-    -i ""${ordered}"/mauve/alignment"${n}"/"${prefix}"_pilon3.fasta" \
-    -o "${ordered}"/"${prefix}"_ordered.fasta \
-    -w 80
-
-genome="${ordered}"/"${prefix}"_ordered.fasta
-
-[ -d "${qc}"/mauve ] || mkdir -p "${qc}"/mauve
+# If more then one contig
+if [ $(cat "$genome" | grep -Ec "^>") -gt 1 ];then
+    remove_small_contigs
+    
+    #if there is still more than one contig
+    if [ $(cat "$genome" | grep -Ec "^>") -gt 1 ];then
+        order_contigs
+    fi
+fi
 
 #align with progessiveMauve
+[ -d "${qc}"/mauve ] || mkdir -p "${qc}"/mauve
+
 "${prog}"/mauve_snapshot_2015-02-13/linux-x64/./progressiveMauve \
     --output="${qc}"/mauve/"${prefix}"_ordered.xmfa \
     "${closest%.gz}" \
@@ -891,22 +919,6 @@ genome="${ordered}"/"${prefix}"_ordered.fasta
 rm -rf "${ordered}"/mauve
 rm -rf "${ordered}"/refseq
 find "$ordered" -type f -name "*.sslist" -exec rm {} \;
-
-
-#########################
-#                       #
-#   Assembly trimming   #
-#                       #
-#########################
-
-
-# Remove contigs smaller than X bp
-perl "${prog}"/phage_typing/removesmallscontigs.pl \
-    "$smallest_contig" \
-    "$genome" \
-    > "${genome%.fasta}"_"${smallest_contig}".fasta
-
-genome="${genome%.fasta}"_"${smallest_contig}".fasta
 
 
 #################
