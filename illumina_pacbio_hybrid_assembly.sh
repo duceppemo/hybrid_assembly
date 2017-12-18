@@ -1082,7 +1082,7 @@ prokka  --outdir "$annotation" \
         --centre "$centre" \
         --cpus "$cpu" \
         --rfam \
-        --proteins "${annotation}"/extra_hits.fasta \
+        --proteins "${annotation}"/extra_hits_renamed.fasta \
         "$genome"
 
 echo -e "Number of hypothetical proteins remaining after the BLAST (1e-30): $(cat "${annotation}"/"${prefix}".faa | grep -ic "hypothetical")" \
