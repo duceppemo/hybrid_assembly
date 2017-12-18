@@ -25,25 +25,32 @@ version="0.1"
 
 
 # Assembly name
-prefix="16-389"
+prefix="MBWGS007"
+
+#Annotation
+kingdom="Bacteria"
 genus="Mycobacterium"
 species="bovis"
+strain="MBWGS007"
 gram="pos"
+locus_tag="XXX"
+centre="OLF"
 
 # Analysis folder
 baseDir=""${HOME}"/Desktop/Mbovis_canu/"$prefix""
 
 # Pacbio reads
-filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/Culture_16_389/Culture_16_389.filtered_subreads.longest.fastq.gz"
-ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/Culture_16_389/Culture_16_389.ccs.fastq.gz"
+filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS007/MBWGS007.filtered_subreads.fastq.gz"
+ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS007/MBWGS007.ccs.fastq.gz"
 
 # Illumina paired-end data
-r1="/media/6tb_raid10/data/Mbovis/canada/illumina/2016_outbreak/16-389_R1.fastq.gz"
-r2="/media/6tb_raid10/data/Mbovis/canada/illumina/2016_outbreak/16-389_R2.fastq.gz"
+r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS007_R1.fastq.gz"
+r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS007_R2.fastq.gz"
 
 # Database to use for metagomic analysis of raw data (contamination)
 # db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
-db="/media/6tb_raid10/db/centrifuge/nt"
+# db="/media/6tb_raid10/db/centrifuge/nt"
+db="/media/6tb_raid10/db/centrifuge/2017-10-12_bact_vir_h"
 
 # Where programs are installed
 prog=""${HOME}"/prog"
@@ -331,30 +338,46 @@ fastqc \
 # Create folder
 [ -d "${qc}"/centrifuge ] || mkdir -p "${qc}"/centrifuge
 
-echo "Running centrifuge on PacBio reads..."
-
-# Run centrifuge
+#Subreads
 centrifuge \
     -p "$cpu" \
     -t \
     --seed "$RANDOM" \
     -x "$db" \
     -U "$filtered_subreads" \
-    --report-file "${qc}"/centrifuge/"${prefix}"_report_pacbio.tsv \
-    > "${qc}"/centrifuge/"${prefix}"_pacbio.tsv
+    --report-file "${qc}"/centrifuge/"${prefix}"_report_subreads.tsv \
+    > "${qc}"/centrifuge/"${prefix}"_subreads.tsv
 
 # Prepare result for display with Krona
-cat "${qc}"/centrifuge/"${prefix}"_pacbio.tsv | \
+cat "${qc}"/centrifuge/"${prefix}"_subreads.tsv | \
     cut -f 1,3 | \
-    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_pacbio.html
+    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_subreads.html
 
 # Visualize the resutls in Firefow browser
-firefox file://"${qc}"/centrifuge/"${prefix}"_pacbio.html &
+firefox file://"${qc}"/centrifuge/"${prefix}"_subreads.html &
+
+#CCS
+centrifuge \
+    -p "$cpu" \
+    -t \
+    --seed "$RANDOM" \
+    -x "$db" \
+    -U "$ccs_reads" \
+    --report-file "${qc}"/centrifuge/"${prefix}"_report_ccs.tsv \
+    > "${qc}"/centrifuge/"${prefix}"ccs.tsv
+
+# Prepare result for display with Krona
+cat "${qc}"/centrifuge/"${prefix}"ccs.tsv | \
+    cut -f 1,3 | \
+    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"ccs.html
+
+# Visualize the resutls in Firefow browser
+firefox file://"${qc}"/centrifuge/"${prefix}"ccs.html &
 
 
 echo "Running centrifuge on Illumina reads..."
 
-# Run centrifuge
+#Illumina paired-end
 centrifuge \
     -p "$cpu" \
     -t \
@@ -362,16 +385,16 @@ centrifuge \
     -x "$db" \
     -1 "${fastq}"/"${prefix}"_R1.fastq.gz \
     -2 "${fastq}"/"${prefix}"_R2.fastq.gz \
-    --report-file "${qc}"/centrifuge/"${prefix}"_report.tsv \
-    > "${qc}"/centrifuge/"${prefix}".tsv
+    --report-file "${qc}"/centrifuge/"${prefix}"_report_pe.tsv \
+    > "${qc}"/centrifuge/"${prefix}"_pe.tsv
 
 # Prepare result for display with Krona
-cat "${qc}"/centrifuge/"${prefix}".tsv | \
+cat "${qc}"/centrifuge/"${prefix}"_pe.tsv | \
     cut -f 1,3 | \
-    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}".html
+    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_pe.html
 
 # Visualize the resutls in Firefow browser
-firefox file://"${qc}"/centrifuge/"${prefix}".html &
+firefox file://"${qc}"/centrifuge/"${prefix}"_pe.html &
 
 
 ###########################
@@ -476,19 +499,18 @@ bbmerge-auto.sh "$memJava" \
 
 #PacBio
 
-#CCS trimming
+#Remove SMRT adapter and split chimera
 removesmartbell.sh "$memJava" \
     in="$ccs_reads" \
     out="${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
     split=t \
-    &> >(tee "${logs}"/ccs_trimming.txt)
+    &> >(tee "${logs}"/ccs_trimmed.txt)
 
-#subread trimming
 removesmartbell.sh "$memJava" \
     in="$filtered_subreads" \
     out="${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
     split=t \
-    &> >(tee "${logs}"/subreads_trimming.txt)
+    &> >(tee "${logs}"/subreads_trimmed.txt)
 
 #Remove internal control from pacbio data
 bbduk.sh "$memJava" \
@@ -509,33 +531,41 @@ bbduk.sh "$memJava" \
     ordered=t \
     2> >(tee "${logs}"/pacbio_subreads_cleaning.txt)
 
-#subread hybrid error correction
-pigz -dk "${merged}"/"${prefix}"_merged.fastq.gz \
-    "${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
-    "${merged}"/"${prefix}"_unmerged_2P.fastq.gz
-
-#7H30 to run
-perl "${prog}"/proovread/bin/proovread \
-    -l "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
-    -s "${merged}"/"${prefix}"_merged.fastq \
-    -s "${merged}"/"${prefix}"_unmerged_1P.fastq \
-    -s "${merged}"/"${prefix}"_unmerged_2P.fastq \
-    -t "$cpu" \
-    -p "${corrected}"/"${prefix}"_subreads_Corrected
-
-rm "${merged}"/"${prefix}"_merged.fastq \
-    "${merged}"/"${prefix}"_unmerged_1P.fastq \
-    "${merged}"/"${prefix}"_unmerged_2P.fastq
-
-mv "${corrected}"/"${prefix}"_subreads_Corrected/"${prefix}"_subreads_Corrected.trimmed.fq \
-    "${corrected}"/"${prefix}"_subreads_Corrected.fastq
-
-pigz "${corrected}"/"${prefix}"_subreads_Corrected.fastq
-
-rm -rf "${corrected}"/"${prefix}"_subreads_Corrected
+#self-correction
+canu -correct \
+    -p "$prefix" \
+    -d "$corrected" \
+    genomeSize="$size" \
+    -pacbio-raw "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz
 
 
-#self-correction?
+
+# proovread brings back all reads to about 1kb. Should stop using proovread.
+# #subread hybrid error correction
+# pigz -dk "${merged}"/"${prefix}"_merged.fastq.gz \
+#     "${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
+#     "${merged}"/"${prefix}"_unmerged_2P.fastq.gz
+
+# #7H30 to run
+# perl "${prog}"/proovread/bin/proovread \
+#     -l "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
+#     -s "${merged}"/"${prefix}"_merged.fastq \
+#     -s "${merged}"/"${prefix}"_unmerged_1P.fastq \
+#     -s "${merged}"/"${prefix}"_unmerged_2P.fastq \
+#     -t "$cpu" \
+#     -p "${corrected}"/"${prefix}"_subreads_Corrected
+
+# rm "${merged}"/"${prefix}"_merged.fastq \
+#     "${merged}"/"${prefix}"_unmerged_1P.fastq \
+#     "${merged}"/"${prefix}"_unmerged_2P.fastq
+
+# mv "${corrected}"/"${prefix}"_subreads_Corrected/"${prefix}"_subreads_Corrected.trimmed.fq \
+#     "${corrected}"/"${prefix}"_subreads_Corrected.fastq
+
+# pigz "${corrected}"/"${prefix}"_subreads_Corrected.fastq
+
+# rm -rf "${corrected}"/"${prefix}"_subreads_Corrected
+
 
 
 
@@ -548,11 +578,11 @@ rm -rf "${corrected}"/"${prefix}"_subreads_Corrected
 
 #de novo assembly
 echo "De novo assembly of PacBio reads using canu..."
-canu \
+canu -trim-assemble \
     -p "$prefix" \
     -d "$assemblies" \
     genomeSize="$size" \
-    -pacbio-corrected "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz
+    -pacbio-corrected "${corrected}"/"${prefix}".correctedReads.fasta.gz
 
 
 #######################
@@ -688,7 +718,7 @@ function Polish()
     samtools index "${polished}"/"${prefix}"_ccs_sorted.bam
 
     #Align pacbio corrected longest subreads
-    bwa mem -x pacbio -t "$cpu" -M "$1" "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz | \
+    bwa mem -x pacbio -t "$cpu" -M "$1" "${corrected}"/"${prefix}".correctedReads.fasta.gz | \
         samtools view -@ "$cpu" -b -h -F 4 - | \
         samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_subreads_Corrected.bam -
 
@@ -753,7 +783,7 @@ spades.py \
     -m "$mem" \
     -k "$kmer" \
     --careful \
-    --pacbio "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
+    --pacbio "${corrected}"/"${prefix}".correctedReads.fasta.gz \
     --untrusted-contigs "$genome" \
     --s1 "$m" \
     --pe1-1 "$mu1" \
@@ -794,7 +824,9 @@ bash "${scripts}"/findClosest.sh \
     "$genome" \
     "$cpu"
 
-distance=""${ordered}"/refseq/"${prefix}"_pilon2.distance.tsv"
+genome_basename=$(basename "$genome")
+genome_name="${genome_basename%.fasta}"
+distance=""${ordered}"/refseq/"${genome_name}".distance.tsv"
 closest=$(cat "$distance" | head -n 1 | cut -f 1)  # The closest is the top one
 closest_acc=$(zcat "$closest" | head -n 1 | cut -d " " -f 1 | tr -d ">")
 closest_ID=$(zcat "$closest" | head -n 1 | cut -d " " -f 2- | cut -d "," -f 1)
@@ -810,7 +842,7 @@ esearch -db nucleotide -query "$acc" \
 
 #extract only the dnaA entry
 cat "${ordered}"/"${acc}"_cds.fasta \
-    | awk 'BEGIN {RS = ">"} /dnaA/ {print ">" $0}' \
+    | awk 'BEGIN {RS = ">"} /dnaA|DnaA|hromosomal replication initiator protein/ {print ">" $0}' \
     > "${ordered}"/"${acc}"_dnaA.fasta
 
 #Check if one and only one dnaA sequence
@@ -830,21 +862,32 @@ fi
 #Cleanup
 rm "${ordered}"/"${acc}"_cds.fasta
 
-circlator all \
-    --verbose \
-    --threads "$cpu" \
-    --assembler "spades" \
-    --assemble_spades_k 127 \
-    --data_type "pacbio-corrected" \
-    --bwa_opts "-x pacbio" \
-    --b2r_discard_unmapped \
-    --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
-    "$genome" \
-    "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
-    "${polished}"/circlator
+#check if one contig or more
+if [ $(cat "$genome" | grep -Ec "^>") -eq 1 ]; then
+    #just run fixstart
+    circlator fixstart \
+        --verbose \
+        --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
+        "$genome" \
+        "${polished}"/"${prefix}"_circlator
+else
+    #--assemble_spades_k 127 \ #use this option to speed up
+    circlator all \
+        --verbose \
+        --threads "$cpu" \
+        --assembler "spades" \
+        --assemble_spades_k 127 \
+        --data_type "pacbio-corrected" \
+        --bwa_opts "-x pacbio" \
+        --b2r_discard_unmapped \
+        --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
+        "$genome" \
+        "${corrected}"/"${prefix}".correctedReads.fasta.gz \
+        "${polished}"/circlator
 
-cp "${polished}"/circlator/06.fixstart.fasta \
-    "${polished}"/"${prefix}"_circlator.fasta
+    cp "${polished}"/circlator/06.fixstart.fasta \
+        "${polished}"/"${prefix}"_circlator.fasta
+fi
 
 genome="${polished}"/"${prefix}"_circlator.fasta
 Polish "$genome" "${prefix}"_pilon3
@@ -858,7 +901,7 @@ genome="${polished}"/"${prefix}"_pilon3.fasta
 #######################
 
 
-function remove_small_contigs ()
+function remove_small_contigs ()  #I think this is done by circlator. If so remove #TODO
 {
     # Remove contigs smaller than X bp
     perl "${prog}"/phage_typing/removesmallscontigs.pl \
@@ -876,7 +919,7 @@ function order_contigs ()
         org.gel.mauve.contigs.ContigOrderer \
         -output "${ordered}"/mauve \
         -ref "${closest%.gz}" \
-        -draft "$genome"
+        -draft "$1"
 
     #fix formating of Mauve output
     #find out how many "alignment" folder there is
@@ -884,39 +927,40 @@ function order_contigs ()
 
     # reformat with no sorting
     perl "${scripts}"/formatFasta.pl \
-        -i ""${ordered}"/mauve/alignment"${n}"/"${prefix}"_pilon3.fasta" \
+        -i "${ordered}"/mauve/alignment"${n}"/"$(basename "$1")" \
         -o "${ordered}"/"${prefix}"_ordered.fasta \
         -w 80
 
     genome="${ordered}"/"${prefix}"_ordered.fasta
+
+    #align with progessiveMauve
+    [ -d "${qc}"/mauve ] || mkdir -p "${qc}"/mauve
+
+    "${prog}"/mauve_snapshot_2015-02-13/linux-x64/./progressiveMauve \
+        --output="${qc}"/mauve/"${prefix}"_ordered.xmfa \
+        "${closest%.gz}" \
+        "$genome"
+
+    # View alignemnt with mauve
+    "${prog}"/mauve_snapshot_2015-02-13/./Mauve \
+        "${qc}"/mauve/"${prefix}"_ordered.xmfa &
+
+    rm -rf "${ordered}"/mauve
 }
 
 [ -s "${closest%.gz}" ] || pigz -d -k "$closest" # decompress if not present
 
 # If more then one contig
 if [ $(cat "$genome" | grep -Ec "^>") -gt 1 ];then
-    remove_small_contigs
+    remove_small_contigs "$genome"
     
     #if there is still more than one contig
     if [ $(cat "$genome" | grep -Ec "^>") -gt 1 ];then
-        order_contigs
+        order_contigs "$genome"
     fi
 fi
 
-#align with progessiveMauve
-[ -d "${qc}"/mauve ] || mkdir -p "${qc}"/mauve
-
-"${prog}"/mauve_snapshot_2015-02-13/linux-x64/./progressiveMauve \
-    --output="${qc}"/mauve/"${prefix}"_ordered.xmfa \
-    "${closest%.gz}" \
-    "$genome"
-
-# View alignemnt with mauve
-"${prog}"/mauve_snapshot_2015-02-13/./Mauve \
-    "${qc}"/mauve/"${prefix}"_ordered.xmfa &
-
 #cleanup
-rm -rf "${ordered}"/mauve
 rm -rf "${ordered}"/refseq
 find "$ordered" -type f -name "*.sslist" -exec rm {} \;
 
@@ -935,7 +979,8 @@ blastn \
     -evalue "1e-10" \
     -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
     -num_threads "$cpu" \
-    -max_target_seqs 1
+    -max_target_seqs 1 \
+    -max_hsps 1
 
 echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
     > "${polished}"/tmp.txt
@@ -967,12 +1012,14 @@ quast.py \
 prokka  --outdir "$annotation" \
         --force \
         --prefix "$prefix" \
-        --centre "OLF" \
-        --kingdom "Bacteria" \
+        --kingdom "$kingdom" \
         --genus "$genus" \
         --species "$species" \
-        --strain "$prefix" \
+        --strain "$strain" \
         --gram "$gram" \
+        --locustag "$locustag" \
+        --compliant \
+        --centre "$centre" \
         --cpus "$cpu" \
         --rfam \
         "$genome"
@@ -995,6 +1042,7 @@ blastp -query "${annotation}"/"${prefix}"_hypoth.faa \
     -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
     -evalue 1e-30 \
     -max_target_seqs 1 \
+    -max_hsps 1 \
     -num_threads "$cpu" \
     > "${annotation}"/"${prefix}"_hypoth.blastp
 
@@ -1015,16 +1063,23 @@ perl "${scripts}"/http_post.pl \
 #     efetch -db protein -format fasta \
 #     > "${spadesOut}"/annotation/extra_hits.fasta
 
+#TODO -> Cleanup sequence titles. E.g. "MULTISPECIES: "
+cat "${annotation}"/extra_hits.fasta | \
+    sed 's/MULTISPECIES: //' | \
+    > "${annotation}"/extra_hits_renamed.fasta
+
 #relaunch Prokka annotation with the new positive blast hit fasta file as reference
 prokka  --outdir "$annotation" \
         --force \
         --prefix "$prefix" \
-        --centre "OLF" \
-        --kingdom "Bacteria" \
+        --kingdom "$kingdom" \
         --genus "$genus" \
         --species "$species" \
-        --strain "$prefix" \
-        --gram "neg" \
+        --strain "$strain" \
+        --gram "$gram" \
+        --locustag "$locustag" \
+        --compliant \
+        --centre "$centre" \
         --cpus "$cpu" \
         --rfam \
         --proteins "${annotation}"/extra_hits.fasta \
