@@ -25,7 +25,7 @@ version="0.1"
 
 
 # Assembly name
-prefix="MBWGS007"
+export prefix="MBWGS007"
 
 #Annotation
 kingdom="Bacteria"
@@ -65,6 +65,10 @@ kmer="21,33,55,77,99,127"
 # For assembly trimming
 smallest_contig=1000
 
+#BUSCO
+busco_db="/media/6tb_raid10/db/busco/bacteria_odb9.tar.gz"
+busco_species="Escherichia coli"
+
 
 ######################
 #                    #
@@ -98,7 +102,7 @@ corrected=""${baseDir}"/corrected"
 normalized=""${baseDir}"/normalized"
 merged=""${baseDir}"/merged"
 aligned=""${baseDir}"/aligned"
-annotation=""${baseDir}"/annotation"
+export annotation=""${baseDir}"/annotation"
 
 # Create folders if do not exist
 [ -d "$baseDir" ] || mkdir -p "$baseDir"
@@ -303,29 +307,57 @@ clumpify.sh "$memJava" \
 ################
 
 
+function run_fastqc()
+{
+    #first argument is output folder
+    #all other are the fastq files to process
+    args=("$@")  #store arguments in array
+    output="${args[0]}"
+    input=("${args[@]:1}")
+
+    [ -d "$output" ] || mkdir -p "$output"
+
+    fastqc \
+        --o  "$output" \
+        --noextract \
+        --threads "$cpu" \
+        ${input[@]}
+}
+
 # Create folder to store report
 [ -d "${qc}"/fastqc/pacbio ] || mkdir -p "${qc}"/fastqc/pacbio
 [ -d "${qc}"/fastqc/illumina ] || mkdir -p "${qc}"/fastqc/illumina
 
 echo "Running FastQC on PacBio reads..."
-
-# Run fastQC on pacbio reads
-fastqc \
-    --o  "${qc}"/fastqc/pacbio \
-    --noextract \
-    --threads "$cpu" \
+run_fastqc \
+    "${qc}"/fastqc/pacbio \
     "${fastq}"/"${prefix}"_ccs.fastq.gz \
     "${fastq}"/"${prefix}"_subreads.fastq.gz
 
 echo "Running FastQC on Illumina reads..."
-
-# Run fastQC on fastq reads
-fastqc \
-    --o  "${qc}"/fastqc/illumina \
-    --noextract \
-    --threads "$cpu" \
+run_fastqc \
+    "${qc}"/fastqc/illumina \
     "${fastq}"/"${prefix}"_R1.fastq.gz \
     "${fastq}"/"${prefix}"_R2.fastq.gz
+
+
+# # Run fastQC on pacbio reads
+# echo "Running FastQC on PacBio reads..."
+# fastqc \
+#     --o  "${qc}"/fastqc/pacbio \
+#     --noextract \
+#     --threads "$cpu" \
+#     "${fastq}"/"${prefix}"_ccs.fastq.gz \
+#     "${fastq}"/"${prefix}"_subreads.fastq.gz
+
+# # Run fastQC on fastq reads
+# echo "Running FastQC on Illumina reads..."
+# fastqc \
+#     --o  "${qc}"/fastqc/illumina \
+#     --noextract \
+#     --threads "$cpu" \
+#     "${fastq}"/"${prefix}"_R1.fastq.gz \
+#     "${fastq}"/"${prefix}"_R2.fastq.gz
 
 
 ######################
@@ -335,66 +367,122 @@ fastqc \
 ######################
 
 
-# Create folder
-[ -d "${qc}"/centrifuge ] || mkdir -p "${qc}"/centrifuge
+function run_centrifuge()
+{
+    #first argument is output file
+    #all other are the fastq files to process
+    args=("$@")  #store arguments in array
+    output="${args[0]}"
+    input=("${args[@]:1}")
 
-#Subreads
-centrifuge \
-    -p "$cpu" \
-    -t \
-    --seed "$RANDOM" \
-    -x "$db" \
-    -U "$filtered_subreads" \
-    --report-file "${qc}"/centrifuge/"${prefix}"_report_subreads.tsv \
-    > "${qc}"/centrifuge/"${prefix}"_subreads.tsv
+    outFolder=$(dirname "$output")
+    [ -d "$outFolder" ] || mkdir -p "$outFolder"
 
-# Prepare result for display with Krona
-cat "${qc}"/centrifuge/"${prefix}"_subreads.tsv | \
-    cut -f 1,3 | \
-    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_subreads.html
+    # echo $input
+    # echo "${input[@]}"
+    # echo "${#input[@]}"
 
-# Visualize the resutls in Firefow browser
-firefox file://"${qc}"/centrifuge/"${prefix}"_subreads.html &
+    if [ "${#input[@]}" -eq 1 ]; then  #single-end
+        option="-U "${input[0]}""
+    elif [ "${#input[@]}" -eq 2 ]; then  #paired-end
+        option="-1 "${input[0]}" -2 "${input[1]}""
+    else  #error
+        echo "Centrifuge can only process a single fastq file (unpaired) or one set of paired-end reads at the time"
+        exit 1
+    fi
 
-#CCS
-centrifuge \
-    -p "$cpu" \
-    -t \
-    --seed "$RANDOM" \
-    -x "$db" \
-    -U "$ccs_reads" \
-    --report-file "${qc}"/centrifuge/"${prefix}"_report_ccs.tsv \
-    > "${qc}"/centrifuge/"${prefix}"ccs.tsv
+    centrifuge \
+        -p "$cpu" \
+        -t \
+        --seed "$RANDOM" \
+        -x "$db" \
+        "$option" \
+        > "$output"
 
-# Prepare result for display with Krona
-cat "${qc}"/centrifuge/"${prefix}"ccs.tsv | \
-    cut -f 1,3 | \
-    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"ccs.html
+    # Prepare result for display with Krona
+    cat "$output" | \
+        cut -f 1,3 | \
+        ktImportTaxonomy /dev/stdin -o "${output%.tsv}".html
 
-# Visualize the resutls in Firefow browser
-firefox file://"${qc}"/centrifuge/"${prefix}"ccs.html &
+    # Visualize the resutls in Firefow browser
+    firefox file://"${output%.tsv}".html &
+}
+
+run_centrifuge \
+    "${qc}"/centrifuge/"${prefix}"_subreads.tsv \
+    "$filtered_subreads"
+
+run_centrifuge \
+    "${qc}"/centrifuge/"${prefix}"_ccs.tsv \
+    "$ccs_reads"
+
+run_centrifuge \
+    "${qc}"/centrifuge/"${prefix}"_pe.tsv \
+    "${fastq}"/"${prefix}"_R1.fastq.gz \
+    "${fastq}"/"${prefix}"_R2.fastq.gz 
 
 
-echo "Running centrifuge on Illumina reads..."
 
-#Illumina paired-end
-centrifuge \
-    -p "$cpu" \
-    -t \
-    --seed "$RANDOM" \
-    -x "$db" \
-    -1 "${fastq}"/"${prefix}"_R1.fastq.gz \
-    -2 "${fastq}"/"${prefix}"_R2.fastq.gz \
-    --report-file "${qc}"/centrifuge/"${prefix}"_report_pe.tsv \
-    > "${qc}"/centrifuge/"${prefix}"_pe.tsv
+# # Create folder
+# [ -d "${qc}"/centrifuge ] || mkdir -p "${qc}"/centrifuge
 
-# Prepare result for display with Krona
-cat "${qc}"/centrifuge/"${prefix}"_pe.tsv | \
-    cut -f 1,3 | \
-    ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_pe.html
+# #Subreads
+# centrifuge \
+#     -p "$cpu" \
+#     -t \
+#     --seed "$RANDOM" \
+#     -x "$db" \
+#     -U "$filtered_subreads" \
+#     --report-file "${qc}"/centrifuge/"${prefix}"_report_subreads.tsv \
+#     > "${qc}"/centrifuge/"${prefix}"_subreads.tsv
 
-# Visualize the resutls in Firefow browser
-firefox file://"${qc}"/centrifuge/"${prefix}"_pe.html &
+# # Prepare result for display with Krona
+# cat "${qc}"/centrifuge/"${prefix}"_subreads.tsv | \
+#     cut -f 1,3 | \
+#     ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_subreads.html
+
+# # Visualize the resutls in Firefow browser
+# firefox file://"${qc}"/centrifuge/"${prefix}"_subreads.html &
+
+# #CCS
+# centrifuge \
+#     -p "$cpu" \
+#     -t \
+#     --seed "$RANDOM" \
+#     -x "$db" \
+#     -U "$ccs_reads" \
+#     --report-file "${qc}"/centrifuge/"${prefix}"_report_ccs.tsv \
+#     > "${qc}"/centrifuge/"${prefix}"ccs.tsv
+
+# # Prepare result for display with Krona
+# cat "${qc}"/centrifuge/"${prefix}"ccs.tsv | \
+#     cut -f 1,3 | \
+#     ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"ccs.html
+
+# # Visualize the resutls in Firefow browser
+# firefox file://"${qc}"/centrifuge/"${prefix}"ccs.html &
+
+
+# echo "Running centrifuge on Illumina reads..."
+
+# #Illumina paired-end
+# centrifuge \
+#     -p "$cpu" \
+#     -t \
+#     --seed "$RANDOM" \
+#     -x "$db" \
+#     -1 "${fastq}"/"${prefix}"_R1.fastq.gz \
+#     -2 "${fastq}"/"${prefix}"_R2.fastq.gz \
+#     --report-file "${qc}"/centrifuge/"${prefix}"_report_pe.tsv \
+#     > "${qc}"/centrifuge/"${prefix}"_pe.tsv
+
+# # Prepare result for display with Krona
+# cat "${qc}"/centrifuge/"${prefix}"_pe.tsv | \
+#     cut -f 1,3 | \
+#     ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_pe.html
+
+# # Visualize the resutls in Firefow browser
+# firefox file://"${qc}"/centrifuge/"${prefix}"_pe.html &
 
 
 ###########################
@@ -536,8 +624,37 @@ canu -correct \
     -p "$prefix" \
     -d "$corrected" \
     genomeSize="$size" \
-    -pacbio-raw "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz
+    -pacbio-raw "${trimmed}"/"${prefix}"_subreads_Cleaned.fastq.gz
 
+#trim
+canu -trim \
+    -p "$prefix" \
+    -d "${corrected}"/trimmed \
+    genomeSize="$size" \
+    -pacbio-corrected "${corrected}"/"${prefix}".correctedReads.fasta.gz
+
+    # output = "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz
+
+function plot_read_length_distribution()
+{
+    name=$(basename "$1")
+    #from bbmap
+    readlength.sh \
+        in="$1" \
+        out="${qc}"/"${name}".length.txt \
+        bin=500
+
+    #plot to file
+    gnuplot -e "set term png; \
+        set output '"${qc}"/"${name}".length.png'; \
+        set xlabel 'Read Length (bp)'; \
+        set ylabel 'Count'; \
+        plot '"${qc}"/"${name}".length.txt' using 1:2 with linespoints" 
+}
+
+
+plot_read_length_distribution "$filtered_subreads"  # before correction
+plot_read_length_distribution "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz  # after correction
 
 
 # proovread brings back all reads to about 1kb. Should stop using proovread.
@@ -582,7 +699,23 @@ canu -trim-assemble \
     -p "$prefix" \
     -d "$assemblies" \
     genomeSize="$size" \
-    -pacbio-corrected "${corrected}"/"${prefix}".correctedReads.fasta.gz
+    -pacbio-corrected "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz
+
+# Unicycler
+python3 "${prog}"/Unicycler/unicycler-runner.py \
+    -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
+    -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
+    -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
+    -o "${assemblies}"/unicycler \
+    -t "$cpu" \
+    --no_correct \
+    --mode conservative \
+    --pilon_path "${prog}"/pilon/pilon-dev.jar
+
+# output = "${assemblies}"/unicycler/assembly.fasta
+
+cp "${assemblies}"/unicycler/assembly.fasta \
+    "${assemblies}"/"${prefix}"_unicycler.fasta
 
 
 #######################
@@ -658,10 +791,12 @@ canu -trim-assemble \
 function Polish()
 {
     # Index genome
-    bwa index "$genome"
+    bwa index "$1"
 
     #Align merged
-    bwa mem -t "$cpu" -M "$1" "$m" | \
+    rg_pe_merged="@RG\tID:"${prefix}"_merged\tCN:"${centre}"\tLB:NexteraXT\tPL:ILLUMINA\tSM:"${prefix}""
+
+    bwa mem -t "$cpu" -M -R "$rg_pe_merged" "$1" "$m" | \
         samtools view -@ "$cpu" -b -h -F 4 - | \
         samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_merged.bam -
 
@@ -681,7 +816,9 @@ function Polish()
 
 
     #Align unmerged
-    bwa mem -t "$cpu" -M "$1" "$mu1" "$mu2" | \
+    rg_pe_unmerged="@RG\tID:"${prefix}"_unmerged\tCN:"${centre}"\tLB:NexteraXT\tPL:ILLUMINA\tSM:"${prefix}""
+
+    bwa mem -t "$cpu" -M -R "$rg_pe_unmerged" "$1" "$mu1" "$mu2" | \
         samtools view -@ "$cpu" -b -h -F 4 - | \
         samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_unmerged.bam -
 
@@ -700,7 +837,9 @@ function Polish()
 
 
     #Align pacbio CCS reads
-    bwa mem -x pacbio -t "$cpu" -M "$1" "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz | \
+    rg_ccs="@RG\tID:"${prefix}"_ccs\tCN:GQC\tLB:SMRTBELL\tPL:PACBIO\tSM:"${prefix}""
+
+    bwa mem -x pacbio -t "$cpu" -M -R "$rg_ccs" "$1" "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz | \
         samtools view -@ "$cpu" -b -h -F 4 - | \
         samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_ccs.bam -
 
@@ -717,8 +856,10 @@ function Polish()
 
     samtools index "${polished}"/"${prefix}"_ccs_sorted.bam
 
-    #Align pacbio corrected longest subreads
-    bwa mem -x pacbio -t "$cpu" -M "$1" "${corrected}"/"${prefix}".correctedReads.fasta.gz | \
+    #Align pacbio corrected subreads
+    rg_subreads="@RG\tID:"${prefix}"_subreads\tCN:GQC\tLB:SMRTBELL\tPL:PACBIO\tSM:"${prefix}""
+
+    bwa mem -x pacbio -t "$cpu" -M -R "$rg_subreads" "$1" "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz | \
         samtools view -@ "$cpu" -b -h -F 4 - | \
         samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_subreads_Corrected.bam -
 
@@ -783,8 +924,9 @@ spades.py \
     -m "$mem" \
     -k "$kmer" \
     --careful \
-    --pacbio "${corrected}"/"${prefix}".correctedReads.fasta.gz \
-    --untrusted-contigs "$genome" \
+    --pacbio "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
+    --trusted-contigs "$genome" \
+    --trusted-contigs "${assemblies}"/"${prefix}"_unicycler.fasta \
     --s1 "$m" \
     --pe1-1 "$mu1" \
     --pe1-2 "$mu2" \
@@ -882,7 +1024,7 @@ else
         --b2r_discard_unmapped \
         --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
         "$genome" \
-        "${corrected}"/"${prefix}".correctedReads.fasta.gz \
+        "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
         "${polished}"/circlator
 
     cp "${polished}"/circlator/06.fixstart.fasta \
@@ -995,10 +1137,24 @@ mv "${polished}"/tmp.txt "${genome%.fasta}".blastn.tsv
 ######################
 
 
+# With QUAST
 quast.py \
     -o "${qc}"/quast \
     -t "$cpu" \
     "$genome"
+
+
+# # With BUSCO
+# python "${prog}"/busco/scripts/run_BUSCO.py \
+#     -i "$genome" \
+#     -c "$cpu" \
+#     -o "${qc}"/busco \
+#     -e 1e-06 \
+#     -m "geno" \
+#     -l "$busco_db" \
+#     -sp "$busco_species" \
+#     -t /tmp \
+#     -z
 
 
 ###################
@@ -1046,6 +1202,26 @@ blastp -query "${annotation}"/"${prefix}"_hypoth.faa \
     -num_threads "$cpu" \
     > "${annotation}"/"${prefix}"_hypoth.blastp
 
+
+# cat "${annotation}"/"${prefix}"_hypoth.faa \
+#     | parallel \
+#         -j "$cpu" \
+#         --block $((mem*1000/48)) \
+#         --recstart '>' \
+#         --env annotation \
+#         --env prefix \
+#         --pipe \
+#             'blastp \
+#                 -query - \
+#                 -db nr \
+#                 -outfmt "6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore" \
+#                 -evalue 1e-30 \
+#                 -max_target_seqs 1 \
+#                 -max_hsps 1 \
+#                 -num_threads 1 \
+#                 > "${annotation}"/"${prefix}"_hypoth.blastp'
+
+
 #Fetch the fasta entry of the hits that do not contain "hypothetical"
 #Re-filter for evalues
 cat "${annotation}"/"${prefix}"_hypoth.blastp | \
@@ -1064,8 +1240,10 @@ perl "${scripts}"/http_post.pl \
 #     > "${spadesOut}"/annotation/extra_hits.fasta
 
 #TODO -> Cleanup sequence titles. E.g. "MULTISPECIES: "
+# Make first letter uppercase
 cat "${annotation}"/extra_hits.fasta | \
     sed 's/MULTISPECIES: //' | \
+    sed 's/ ./\U&/'
     > "${annotation}"/extra_hits_renamed.fasta
 
 #relaunch Prokka annotation with the new positive blast hit fasta file as reference
