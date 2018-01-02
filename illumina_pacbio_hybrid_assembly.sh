@@ -25,13 +25,13 @@ version="0.1"
 
 
 # Assembly name
-export prefix="MBWGS007"
+export prefix="MBWGS070"
 
 #Annotation
 kingdom="Bacteria"
 genus="Mycobacterium"
 species="bovis"
-strain="MBWGS007"
+strain="MBWGS070"
 gram="pos"
 locus_tag="XXX"
 centre="OLF"
@@ -40,12 +40,12 @@ centre="OLF"
 baseDir=""${HOME}"/Desktop/Mbovis_canu/"$prefix""
 
 # Pacbio reads
-filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS007/MBWGS007.filtered_subreads.fastq.gz"
-ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS007/MBWGS007.ccs.fastq.gz"
+filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS070/MBWGS070.filtered_subreads.fastq.gz"
+ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS070/MBWGS070.ccs.fastq.gz"
 
 # Illumina paired-end data
-r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS007_R1.fastq.gz"
-r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS007_R2.fastq.gz"
+r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS070_R1.fastq.gz"
+r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS070_R2.fastq.gz"
 
 # Database to use for metagomic analysis of raw data (contamination)
 # db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
@@ -341,25 +341,6 @@ run_fastqc \
     "${fastq}"/"${prefix}"_R2.fastq.gz
 
 
-# # Run fastQC on pacbio reads
-# echo "Running FastQC on PacBio reads..."
-# fastqc \
-#     --o  "${qc}"/fastqc/pacbio \
-#     --noextract \
-#     --threads "$cpu" \
-#     "${fastq}"/"${prefix}"_ccs.fastq.gz \
-#     "${fastq}"/"${prefix}"_subreads.fastq.gz
-
-# # Run fastQC on fastq reads
-# echo "Running FastQC on Illumina reads..."
-# fastqc \
-#     --o  "${qc}"/fastqc/illumina \
-#     --noextract \
-#     --threads "$cpu" \
-#     "${fastq}"/"${prefix}"_R1.fastq.gz \
-#     "${fastq}"/"${prefix}"_R2.fastq.gz
-
-
 ######################
 #                    #
 #   Centrifuge raw   #
@@ -379,6 +360,7 @@ function run_centrifuge()
     [ -d "$outFolder" ] || mkdir -p "$outFolder"
 
     # echo $input
+    # echo $output
     # echo "${input[@]}"
     # echo "${#input[@]}"
 
@@ -390,22 +372,31 @@ function run_centrifuge()
         echo "Centrifuge can only process a single fastq file (unpaired) or one set of paired-end reads at the time"
         exit 1
     fi
-
-    centrifuge \
+    
+    #build the command
+    com="centrifuge \
         -p "$cpu" \
         -t \
         --seed "$RANDOM" \
         -x "$db" \
         "$option" \
-        > "$output"
+        > "$output""
 
-    # Prepare result for display with Krona
-    cat "$output" | \
-        cut -f 1,3 | \
-        ktImportTaxonomy /dev/stdin -o "${output%.tsv}".html
+    # run the command
+    eval "$com"
 
-    # Visualize the resutls in Firefow browser
-    firefox file://"${output%.tsv}".html &
+    if [ $? -eq 0 ]; then  #if no error from centrifuge
+        # Prepare centrifuge result for display with Krona
+        cat "$output" | \
+            cut -f 1,3 | \
+            ktImportTaxonomy /dev/stdin -o "${output%.tsv}".html
+
+        # Visualize the resutls in web browser of choice
+        firefox file://"${output%.tsv}".html &
+    else
+        echo "An error occured while processing "$input""
+        exit 1
+    fi
 }
 
 run_centrifuge \
@@ -420,69 +411,6 @@ run_centrifuge \
     "${qc}"/centrifuge/"${prefix}"_pe.tsv \
     "${fastq}"/"${prefix}"_R1.fastq.gz \
     "${fastq}"/"${prefix}"_R2.fastq.gz 
-
-
-
-# # Create folder
-# [ -d "${qc}"/centrifuge ] || mkdir -p "${qc}"/centrifuge
-
-# #Subreads
-# centrifuge \
-#     -p "$cpu" \
-#     -t \
-#     --seed "$RANDOM" \
-#     -x "$db" \
-#     -U "$filtered_subreads" \
-#     --report-file "${qc}"/centrifuge/"${prefix}"_report_subreads.tsv \
-#     > "${qc}"/centrifuge/"${prefix}"_subreads.tsv
-
-# # Prepare result for display with Krona
-# cat "${qc}"/centrifuge/"${prefix}"_subreads.tsv | \
-#     cut -f 1,3 | \
-#     ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_subreads.html
-
-# # Visualize the resutls in Firefow browser
-# firefox file://"${qc}"/centrifuge/"${prefix}"_subreads.html &
-
-# #CCS
-# centrifuge \
-#     -p "$cpu" \
-#     -t \
-#     --seed "$RANDOM" \
-#     -x "$db" \
-#     -U "$ccs_reads" \
-#     --report-file "${qc}"/centrifuge/"${prefix}"_report_ccs.tsv \
-#     > "${qc}"/centrifuge/"${prefix}"ccs.tsv
-
-# # Prepare result for display with Krona
-# cat "${qc}"/centrifuge/"${prefix}"ccs.tsv | \
-#     cut -f 1,3 | \
-#     ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"ccs.html
-
-# # Visualize the resutls in Firefow browser
-# firefox file://"${qc}"/centrifuge/"${prefix}"ccs.html &
-
-
-# echo "Running centrifuge on Illumina reads..."
-
-# #Illumina paired-end
-# centrifuge \
-#     -p "$cpu" \
-#     -t \
-#     --seed "$RANDOM" \
-#     -x "$db" \
-#     -1 "${fastq}"/"${prefix}"_R1.fastq.gz \
-#     -2 "${fastq}"/"${prefix}"_R2.fastq.gz \
-#     --report-file "${qc}"/centrifuge/"${prefix}"_report_pe.tsv \
-#     > "${qc}"/centrifuge/"${prefix}"_pe.tsv
-
-# # Prepare result for display with Krona
-# cat "${qc}"/centrifuge/"${prefix}"_pe.tsv | \
-#     cut -f 1,3 | \
-#     ktImportTaxonomy /dev/stdin -o  "${qc}"/centrifuge/"${prefix}"_pe.html
-
-# # Visualize the resutls in Firefow browser
-# firefox file://"${qc}"/centrifuge/"${prefix}"_pe.html &
 
 
 ###########################
@@ -652,38 +580,9 @@ function plot_read_length_distribution()
         plot '"${qc}"/"${name}".length.txt' using 1:2 with linespoints" 
 }
 
-
+#create plots of pacbio read length distribution befor and after correction
 plot_read_length_distribution "$filtered_subreads"  # before correction
 plot_read_length_distribution "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz  # after correction
-
-
-# proovread brings back all reads to about 1kb. Should stop using proovread.
-# #subread hybrid error correction
-# pigz -dk "${merged}"/"${prefix}"_merged.fastq.gz \
-#     "${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
-#     "${merged}"/"${prefix}"_unmerged_2P.fastq.gz
-
-# #7H30 to run
-# perl "${prog}"/proovread/bin/proovread \
-#     -l "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
-#     -s "${merged}"/"${prefix}"_merged.fastq \
-#     -s "${merged}"/"${prefix}"_unmerged_1P.fastq \
-#     -s "${merged}"/"${prefix}"_unmerged_2P.fastq \
-#     -t "$cpu" \
-#     -p "${corrected}"/"${prefix}"_subreads_Corrected
-
-# rm "${merged}"/"${prefix}"_merged.fastq \
-#     "${merged}"/"${prefix}"_unmerged_1P.fastq \
-#     "${merged}"/"${prefix}"_unmerged_2P.fastq
-
-# mv "${corrected}"/"${prefix}"_subreads_Corrected/"${prefix}"_subreads_Corrected.trimmed.fq \
-#     "${corrected}"/"${prefix}"_subreads_Corrected.fastq
-
-# pigz "${corrected}"/"${prefix}"_subreads_Corrected.fastq
-
-# rm -rf "${corrected}"/"${prefix}"_subreads_Corrected
-
-
 
 
 ################
@@ -700,22 +599,6 @@ canu -trim-assemble \
     -d "$assemblies" \
     genomeSize="$size" \
     -pacbio-corrected "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz
-
-# Unicycler
-python3 "${prog}"/Unicycler/unicycler-runner.py \
-    -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
-    -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
-    -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
-    -o "${assemblies}"/unicycler \
-    -t "$cpu" \
-    --no_correct \
-    --mode conservative \
-    --pilon_path "${prog}"/pilon/pilon-dev.jar
-
-# output = "${assemblies}"/unicycler/assembly.fasta
-
-cp "${assemblies}"/unicycler/assembly.fasta \
-    "${assemblies}"/"${prefix}"_unicycler.fasta
 
 
 #######################
@@ -941,6 +824,22 @@ cp "${polished}"/spades/scaffolds.fasta "${polished}"/"${prefix}"_spades.fasta
 genome="${polished}"/"${prefix}"_spades.fasta
 Polish "$genome" "${prefix}"_pilon2
 genome="${polished}"/"${prefix}"_pilon2.fasta
+
+# Unicycler hybrid assembly
+python3 "${prog}"/Unicycler/unicycler-runner.py \
+    -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
+    -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
+    -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
+    -o "${assemblies}"/unicycler \
+    -t "$cpu" \
+    --no_correct \
+    --mode conservative \
+    --pilon_path "${prog}"/pilon/pilon-dev.jar
+
+# output = "${assemblies}"/unicycler/assembly.fasta
+
+cp "${assemblies}"/unicycler/assembly.fasta \
+    "${assemblies}"/"${prefix}"_unicycler.fasta
 
 
 ###################
