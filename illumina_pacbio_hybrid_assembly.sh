@@ -25,13 +25,13 @@ version="0.1"
 
 
 # Assembly name
-export prefix="MBWGS070"
+export prefix="MBWGS124"
 
 #Annotation
 kingdom="Bacteria"
 genus="Mycobacterium"
 species="bovis"
-strain="MBWGS070"
+strain="MBWGS124"
 gram="pos"
 locus_tag="XXX"
 centre="OLF"
@@ -40,12 +40,12 @@ centre="OLF"
 baseDir=""${HOME}"/Desktop/Mbovis_canu/"$prefix""
 
 # Pacbio reads
-filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS070/MBWGS070.filtered_subreads.fastq.gz"
-ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS070/MBWGS070.ccs.fastq.gz"
+filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS124/MBWGS124.filtered_subreads.fastq.gz"
+ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS124/MBWGS124.ccs.fastq.gz"
 
 # Illumina paired-end data
-r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS070_R1.fastq.gz"
-r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS070_R2.fastq.gz"
+r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS124_R1.fastq.gz"
+r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS124_R2.fastq.gz"
 
 # Database to use for metagomic analysis of raw data (contamination)
 # db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
@@ -66,8 +66,8 @@ kmer="21,33,55,77,99,127"
 smallest_contig=1000
 
 #BUSCO
-busco_db="/media/6tb_raid10/db/busco/bacteria_odb9.tar.gz"
-busco_species="Escherichia coli"
+# busco_db="/media/6tb_raid10/db/busco/bacteria_odb9.tar.gz"
+# busco_species="Escherichia coli"
 
 
 ######################
@@ -271,7 +271,7 @@ clumpify.sh "$memJava" \
     out2="${fastq}"/"${prefix}"_R2.fastq.gz \
     reorder \
     ziplevel=9 \
-    2> >(tee -a "${logs}"/clumpify.txt)
+    2> >(tee -a "${logs}"/clumpify_illumina.txt)
 
 #Do it for pacbio reads too?
 clumpify.sh "$memJava" \
@@ -322,6 +322,12 @@ function run_fastqc()
         --noextract \
         --threads "$cpu" \
         ${input[@]}
+
+    #Merge all FastQC reports together
+    multiqc \
+        -o "$output" \
+        -n merged_reports.html \
+        "$output"
 }
 
 # Create folder to store report
@@ -594,11 +600,16 @@ plot_read_length_distribution "${corrected}"/trimmed/"${prefix}".trimmedReads.fa
 
 #de novo assembly
 echo "De novo assembly of PacBio reads using canu..."
-canu -trim-assemble \
+canu -assemble \
     -p "$prefix" \
     -d "$assemblies" \
     genomeSize="$size" \
     -pacbio-corrected "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz
+
+mv "${assemblies}"/"${prefix}".unitigs.fasta \
+    "${assemblies}"/"${prefix}"_canu.fasta
+
+genome=""${assemblies}"/"${prefix}"_canu.fasta"
 
 
 #######################
@@ -611,7 +622,7 @@ canu -trim-assemble \
 # Illumina reads are used to polish the PacBio de novo assembly
 # They are then used for a new de novo assembly with SPAdes,
 # using the polished PacBio assembly as template for scaffolding (--trusted-contigs)
-# PacBio longest subreads are also used for scaffolding
+# PacBio subreads are also used for scaffolding
 # PacBio Circular Consensus Sequences (CCS) are used as single-end reads for the assembly
 
 
@@ -620,7 +631,7 @@ canu -trim-assemble \
 # echo "Mapping PacBio reads onto canu contigs using minimap..."
 # minimap \
 #     -t "$cpu" \
-#     "${assemblies}"/"${prefix}".unitigs.fasta \
+#     "$genome" \
 #     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
 #     > "${polished}"/"${prefix}"_minimap_overlaps.paf
 
@@ -629,7 +640,7 @@ canu -trim-assemble \
 #     -t "$cpu" \
 #     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
 #     "${polished}"/"${prefix}"_minimap_overlaps.paf \
-#     "${assemblies}"/"${prefix}".unitigs.fasta \
+#     "$genome" \
 #     "${polished}"/"${prefix}"_racon.fasta
 
 
@@ -641,7 +652,7 @@ canu -trim-assemble \
 # #map pacbio reads back to assembly
 # blasr \
 #    "${corrected}"/"${prefix}"_subreads_Corrected.fasta \
-#    "${assemblies}"/"${prefix}".unitigs.fasta \
+#    "$genome" \
 #    --nproc "$cpu" \
 #    --out "${polished}"/"${prefix}"_subreads_Corrected.sam \
 #    --bam
@@ -649,7 +660,7 @@ canu -trim-assemble \
 # samtools view \
 #     -@ "$cpu" \
 #     -b -h \
-#     -T "${assemblies}"/"${prefix}".unitigs.fasta \
+#     -T "$genome" \
 #     "${polished}"/"${prefix}"_subreads_Corrected.sam \
 #     > "${polished}"/"${prefix}"_subreads_Corrected.bam
 
@@ -664,7 +675,7 @@ canu -trim-assemble \
 
 # quiver \
 #     -j "$cpu" \
-#     -r "${assemblies}"/"${prefix}".unitigs.fasta \
+#     -r "$genome" \
 #     -o "${polished}"/"${prefix}"_quiver.fasta \
 #     "${polished}"/"${prefix}"_subreads_sorted.bam
 
@@ -796,9 +807,24 @@ mu2=$(sed "s/_1P/_2P/" <<< "$mu1")  #unmerged R2
 m=$(find "$merged" -type f -name "*merged.fastq.gz")  # merged
 
 # 1st round of polishing
-genome="${assemblies}"/"${prefix}".unitigs.fasta  # Canu assembly
 Polish "$genome" "${prefix}"_pilon1
 genome="${polished}"/"${prefix}"_pilon1.fasta
+
+# Unicycler hybrid assembly
+# output = "${assemblies}"/unicycler/assembly.fasta
+python3 "${prog}"/Unicycler/unicycler-runner.py \
+    -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
+    -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
+    -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
+    -s "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
+    -o "${assemblies}"/unicycler \
+    -t "$cpu" \
+    --no_correct \
+    --mode conservative \
+    --pilon_path "${prog}"/pilon/pilon-dev.jar
+
+cp "${assemblies}"/unicycler/assembly.fasta \
+    "${assemblies}"/"${prefix}"_unicycler.fasta
 
 #SPAdes hybrid assembly
 spades.py \
@@ -814,32 +840,18 @@ spades.py \
     --pe1-1 "$mu1" \
     --pe1-2 "$mu2" \
     --s2 "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
-    -o "${polished}"/spades
+    -o "${assemblies}"/spades
 
 #copy and rename assembly
-cp "${polished}"/spades/scaffolds.fasta "${polished}"/"${prefix}"_spades.fasta
+cp "${assemblies}"/spades/scaffolds.fasta \
+    "${assemblies}"/"${prefix}"_spades.fasta
+
+genome="${assemblies}"/"${prefix}"_spades.fasta
 
 #Polish with pilon
 #Second round of Pilon correction
-genome="${polished}"/"${prefix}"_spades.fasta
 Polish "$genome" "${prefix}"_pilon2
 genome="${polished}"/"${prefix}"_pilon2.fasta
-
-# Unicycler hybrid assembly
-python3 "${prog}"/Unicycler/unicycler-runner.py \
-    -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
-    -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
-    -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
-    -o "${assemblies}"/unicycler \
-    -t "$cpu" \
-    --no_correct \
-    --mode conservative \
-    --pilon_path "${prog}"/pilon/pilon-dev.jar
-
-# output = "${assemblies}"/unicycler/assembly.fasta
-
-cp "${assemblies}"/unicycler/assembly.fasta \
-    "${assemblies}"/"${prefix}"_unicycler.fasta
 
 
 ###################
@@ -908,9 +920,13 @@ if [ $(cat "$genome" | grep -Ec "^>") -eq 1 ]; then
     #just run fixstart
     circlator fixstart \
         --verbose \
-        --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
         "$genome" \
         "${polished}"/"${prefix}"_circlator
+    # circlator fixstart \
+    #     --verbose \
+    #     --genes_fa "${ordered}"/"${acc}"_dnaA.fasta \
+    #     "$genome" \
+    #     "${polished}"/"${prefix}"_circlator
 else
     #--assemble_spades_k 127 \ #use this option to speed up
     circlator all \
