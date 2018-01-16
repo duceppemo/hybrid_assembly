@@ -331,18 +331,18 @@ function run_fastqc()
 }
 
 # Create folder to store report
-[ -d "${qc}"/fastqc/pacbio ] || mkdir -p "${qc}"/fastqc/pacbio
-[ -d "${qc}"/fastqc/illumina ] || mkdir -p "${qc}"/fastqc/illumina
+[ -d "${qc}"/fastqc/pacbio/raw ] || mkdir -p "${qc}"/fastqc/pacbio/raw
+[ -d "${qc}"/fastqc/illumina/raw ] || mkdir -p "${qc}"/fastqc/illumina/raw
 
 echo "Running FastQC on PacBio reads..."
 run_fastqc \
-    "${qc}"/fastqc/pacbio \
+    "${qc}"/fastqc/pacbio/raw \
     "${fastq}"/"${prefix}"_ccs.fastq.gz \
     "${fastq}"/"${prefix}"_subreads.fastq.gz
 
 echo "Running FastQC on Illumina reads..."
 run_fastqc \
-    "${qc}"/fastqc/illumina \
+    "${qc}"/fastqc/illumina/raw \
     "${fastq}"/"${prefix}"_R1.fastq.gz \
     "${fastq}"/"${prefix}"_R2.fastq.gz
 
@@ -436,6 +436,13 @@ filterbytile.sh "$memJava" \
     out2="${trimmed}"/"${prefix}"_Filtered_2P.fastq.gz \
     2> >(tee "${logs}"/illumina_tile_filtering.txt)
 
+#QC
+[ -d "${qc}"/fastqc/illumina/tile ] || mkdir -p "${qc}"/fastqc/illumina/tile
+run_fastqc \
+    "${qc}"/fastqc/illumina/tile \
+    "${trimmed}"/"${prefix}"_Filtered_1P.fastq.gz \
+    "${trimmed}"/"${prefix}"_Filtered_2P.fastq.gz
+
 #Quality trimming and adapter trimming
 bbduk.sh "$memJava" \
     in="${trimmed}"/"${prefix}"_Filtered_1P.fastq.gz \
@@ -450,6 +457,13 @@ bbduk.sh "$memJava" \
     ordered=t \
     2> >(tee "${logs}"/illumina_trimming.txt)
 
+#QC
+[ -d "${qc}"/fastqc/illumina/trimmed ] || mkdir -p "${qc}"/fastqc/illumina/trimmed
+run_fastqc \
+    "${qc}"/fastqc/illumina/trimmed \
+    "${trimmed}"/"${prefix}"_Trimmed_1P.fastq.gz \
+    "${trimmed}"/"${prefix}"_Trimmed_2P.fastq.gz
+
 #Removing synthetic artifacts and spike-ins
 bbduk.sh "$memJava" \
     in="${trimmed}"/"${prefix}"_Trimmed_1P.fastq.gz \
@@ -462,6 +476,12 @@ bbduk.sh "$memJava" \
     ordered=t \
     2> >(tee "${logs}"/illumina_cleaning.txt)
 
+#QC
+[ -d "${qc}"/fastqc/illumina/cleaned ] || mkdir -p "${qc}"/fastqc/illumina/cleaned
+run_fastqc \
+    "${qc}"/fastqc/illumina/cleaned \
+    "${trimmed}"/"${prefix}"_Cleaned_1P.fastq.gz \
+    "${trimmed}"/"${prefix}"_Cleaned_2P.fastq.gz
 
 #Correcting Illumina paired-end reads
 #Phase 1
@@ -518,6 +538,13 @@ bbmerge-auto.sh "$memJava" \
     ihist="${logs}"/illumina_ihist_merge.txt \
     2> >(tee "${logs}"/illumina_merge.txt)
 
+#QC
+[ -d "${qc}"/fastqc/illumina/merged ] || mkdir -p "${qc}"/fastqc/illumina/merged
+run_fastqc \
+    "${qc}"/fastqc/illumina/merged \
+    "${merged}"/"${prefix}"_merged.fastq.gz \
+    "${merged}"/"${prefix}"_unmerged_1P.fastq.gz \
+    "${merged}"/"${prefix}"_unmerged_2P.fastq.gz
 
 #PacBio
 
@@ -533,6 +560,13 @@ removesmartbell.sh "$memJava" \
     out="${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz \
     split=t \
     &> >(tee "${logs}"/subreads_trimmed.txt)
+
+#QC
+[ -d "${qc}"/fastqc/pacbio/adapter ] || mkdir -p "${qc}"/fastqc/pacbio/adapter
+run_fastqc \
+    "${qc}"/fastqc/pacbio/adapter \
+    "${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
+    "${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz
 
 #Remove internal control from pacbio data
 bbduk.sh "$memJava" \
@@ -553,12 +587,20 @@ bbduk.sh "$memJava" \
     ordered=t \
     2> >(tee "${logs}"/pacbio_subreads_cleaning.txt)
 
+#QC
+[ -d "${qc}"/fastqc/pacbio/phix ] || mkdir -p "${qc}"/fastqc/pacbio/phix
+run_fastqc \
+    "${qc}"/fastqc/pacbio/phix \
+    "${trimmed}"/"$prefix"_ccs_Cleaned.fastq.gz \
+    "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz
+
 #self-correction
 canu -correct \
     -p "$prefix" \
     -d "$corrected" \
     genomeSize="$size" \
     -pacbio-raw "${trimmed}"/"${prefix}"_subreads_Cleaned.fastq.gz
+    # output = "${corrected}"/"${prefix}".correctedReads.fasta.gz
 
 #trim
 canu -trim \
@@ -566,7 +608,6 @@ canu -trim \
     -d "${corrected}"/trimmed \
     genomeSize="$size" \
     -pacbio-corrected "${corrected}"/"${prefix}".correctedReads.fasta.gz
-
     # output = "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz
 
 function plot_read_length_distribution()
@@ -626,23 +667,25 @@ genome=""${assemblies}"/"${prefix}"_canu.fasta"
 # PacBio Circular Consensus Sequences (CCS) are used as single-end reads for the assembly
 
 
-# Disabled because it introduces too many indels in the assembly
-# # Polish assembly with racon
-# echo "Mapping PacBio reads onto canu contigs using minimap..."
-# minimap \
-#     -t "$cpu" \
-#     "$genome" \
-#     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
-#     > "${polished}"/"${prefix}"_minimap_overlaps.paf
+# Introduces lots of indels in the assembly if using uncorrected subreads
+# Helps reduce size of assembly
+# Polish assembly with racon
+echo "Mapping PacBio reads onto canu contigs using minimap..."
+minimap2 \
+    -t "$cpu" \
+    "$genome" \
+    "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
+    > "${polished}"/"${prefix}"_minimap_overlaps.paf
 
-# echo "Correcting contigs with PacBio reads using racon..."
-# racon \
-#     -t "$cpu" \
-#     "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
-#     "${polished}"/"${prefix}"_minimap_overlaps.paf \
-#     "$genome" \
-#     "${polished}"/"${prefix}"_racon.fasta
+echo "Correcting contigs with PacBio reads using racon..."
+racon \
+    -t "$cpu" \
+    "${trimmed}"/"$prefix"_subreads_Cleaned.fastq.gz \
+    "${polished}"/"${prefix}"_minimap_overlaps.paf \
+    "$genome" \
+    "${polished}"/"${prefix}"_racon.fasta
 
+genome="${polished}"/"${prefix}"_racon.fasta
 
 # #convert fastq to fasta
 # zcat "${corrected}"/"${prefix}"_subreads_Corrected.fastq.gz \
@@ -802,9 +845,12 @@ function Polish()
 }
 
 # Illumina reads to use for polishing
-mu1=$(find "$merged" -type f -name "*_1P.fastq.gz") #unmerged R1
-mu2=$(sed "s/_1P/_2P/" <<< "$mu1")  #unmerged R2
-m=$(find "$merged" -type f -name "*merged.fastq.gz")  # merged
+# mu1=$(find "$merged" -type f -name "*_1P.fastq.gz") #unmerged R1
+# mu2=$(sed "s/_1P/_2P/" <<< "$mu1")  #unmerged R2
+# m=$(find "$merged" -type f -name "*merged.fastq.gz")  # merged
+m="${merged}"/"${prefix}"_merged.fastq.gz
+mu1="${merged}"/"${prefix}"_unmerged_1P.fastq.gz
+mu2="${merged}"/"${prefix}"_unmerged_2P.fastq.gz
 
 # 1st round of polishing
 Polish "$genome" "${prefix}"_pilon1
@@ -812,21 +858,39 @@ genome="${polished}"/"${prefix}"_pilon1.fasta
 
 # Unicycler hybrid assembly
 # output = "${assemblies}"/unicycler/assembly.fasta
+
+#use pacbio ccs as single-end reads
+# python3 "${prog}"/Unicycler/unicycler-runner.py \
+#     -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
+#     -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
+#     -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
+#     -s "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
+#     -o "${assemblies}"/unicycler \
+#     -t "$cpu" \
+#     --keep 2 \
+#     --no_correct \
+#     --mode conservative \
+#     --pilon_path "${prog}"/pilon/pilon-dev.jar
+
+#use merged paired-end as single-end reads
 python3 "${prog}"/Unicycler/unicycler-runner.py \
-    -1 "${corrected}"/"${prefix}"_Cor3_1P.fastq.gz \
-    -2 "${corrected}"/"${prefix}"_Cor3_2P.fastq.gz \
+    -1 "$mu1" \
+    -2 "$mu2" \
+    -s "$m" \
     -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
-    -s "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
-    -o "${assemblies}"/unicycler \
+    -o "${assemblies}"/unicycler_merged_pe \
     -t "$cpu" \
+    --keep 2 \
     --no_correct \
     --mode conservative \
     --pilon_path "${prog}"/pilon/pilon-dev.jar
+
 
 cp "${assemblies}"/unicycler/assembly.fasta \
     "${assemblies}"/"${prefix}"_unicycler.fasta
 
 #SPAdes hybrid assembly
+#Canu assembly is less accurate than Unicycler assembly
 spades.py \
     --only-assembler \
     -t "$cpu" \
@@ -834,7 +898,7 @@ spades.py \
     -k "$kmer" \
     --careful \
     --pacbio "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
-    --trusted-contigs "$genome" \
+    --untrusted-contigs "$genome" \
     --trusted-contigs "${assemblies}"/"${prefix}"_unicycler.fasta \
     --s1 "$m" \
     --pe1-1 "$mu1" \
