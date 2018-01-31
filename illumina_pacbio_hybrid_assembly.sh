@@ -415,7 +415,7 @@ run_centrifuge \
 
 run_centrifuge \
     "${qc}"/centrifuge/"${prefix}"_pe.tsv \
-    "${fastq}"/"${prefix}"_R1.fastq.gz \
+    "${fastq}"/"${prefix}"_R1.fstq.gz \
     "${fastq}"/"${prefix}"_R2.fastq.gz 
 
 
@@ -427,6 +427,17 @@ run_centrifuge \
 
 
 # Illumina
+
+# #normalize reads
+# #NOTE:  All depth parameters control kmer depth, not read depth.
+# bbnorm.sh "$memJava" \
+#     in="${fastq}"/"${prefix}"_R1.fastq.gz \
+#     in2="${fastq}"/"${prefix}"_R2.fastq.gz \
+#     out="${trimmed}"/"${prefix}"_Normalized_1P.fastq.gz \
+#     out2="${trimmed}"/"${prefix}"_Normalized_2P.fastq.gz \
+#     target=100 \
+#     mindepth=2 \
+#     2> >(tee "${logs}"/illumina_tile_filtering.txt)
 
 #Removing low-quality regions
 filterbytile.sh "$memJava" \
@@ -465,6 +476,7 @@ run_fastqc \
     "${trimmed}"/"${prefix}"_Trimmed_2P.fastq.gz
 
 #Removing synthetic artifacts and spike-ins
+#Add to "ref" any contaminants found with centrifuge
 bbduk.sh "$memJava" \
     in="${trimmed}"/"${prefix}"_Trimmed_1P.fastq.gz \
     in2="${trimmed}"/"${prefix}"_Trimmed_2P.fastq.gz \
@@ -569,6 +581,7 @@ run_fastqc \
     "${trimmed}"/"$prefix"_subreads_trimmed.fastq.gz
 
 #Remove internal control from pacbio data
+#Add to "ref" any contaminants found with centrifuge
 bbduk.sh "$memJava" \
     in="${trimmed}"/"$prefix"_ccs_trimmed.fastq.gz \
     ref=/media/6tb_raid10/ref/MG495226.1.fasta \
@@ -647,10 +660,42 @@ canu -assemble \
     genomeSize="$size" \
     -pacbio-corrected "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz
 
-mv "${assemblies}"/"${prefix}".unitigs.fasta \
+mv "${assemblies}"/"${prefix}".contigs.fasta \
     "${assemblies}"/"${prefix}"_canu.fasta
 
 genome=""${assemblies}"/"${prefix}"_canu.fasta"
+
+
+#################
+#               #
+#   Contig ID   #
+#               #
+#################
+
+
+function run_blast()
+{
+    blastn \
+    -db nt \
+    -query "$1" \
+    -out "${1%.fasta}".blastn.tsv \
+    -evalue "1e-10" \
+    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
+    -num_threads "$cpu" \
+    -max_target_seqs 1 \
+    -max_hsps 1
+
+    echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
+        > "${1%.fasta}".blastn.tsv.tmp
+    cat "${1%.fasta}".blastn.tsv >> "${1%.fasta}".blastn.tsv.tmp
+    mv "${1%.fasta}".blastn.tsv.tmp "${1%.fasta}".blastn.tsv
+}
+
+run_blast "$genome"
+
+#inspect manually blast output
+#Remove any contigs from contaminant
+#Remove low coverage or short contigs 
 
 
 #######################
@@ -872,22 +917,30 @@ genome="${polished}"/"${prefix}"_pilon1.fasta
 #     --mode conservative \
 #     --pilon_path "${prog}"/pilon/pilon-dev.jar
 
+#Concatenate merged Illumina paired-end reads with PacBio CCS to feed as single-end reads to Unicycler
+cat "$m" "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
+    > "${corrected}"/"${prefix}"_single.fastq.gz
+
 #use merged paired-end as single-end reads
 python3 "${prog}"/Unicycler/unicycler-runner.py \
     -1 "$mu1" \
     -2 "$mu2" \
-    -s "$m" \
+    -s "${corrected}"/"${prefix}"_single.fastq.gz \
     -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
-    -o "${assemblies}"/unicycler_merged_pe \
+    -o "${assemblies}"/unicycler \
     -t "$cpu" \
     --keep 2 \
     --no_correct \
-    --mode conservative \
+    --mode normal \
     --pilon_path "${prog}"/pilon/pilon-dev.jar
-
 
 cp "${assemblies}"/unicycler/assembly.fasta \
     "${assemblies}"/"${prefix}"_unicycler.fasta
+
+run_blast "${assemblies}"/"${prefix}"_unicycler.fasta
+
+#inspect manually blast output
+#Remove low coverage or short contigs
 
 #SPAdes hybrid assembly
 #Canu assembly is less accurate than Unicycler assembly
@@ -898,7 +951,7 @@ spades.py \
     -k "$kmer" \
     --careful \
     --pacbio "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
-    --untrusted-contigs "$genome" \
+    --trusted-contigs "$genome" \
     --trusted-contigs "${assemblies}"/"${prefix}"_unicycler.fasta \
     --s1 "$m" \
     --pe1-1 "$mu1" \
@@ -911,6 +964,11 @@ cp "${assemblies}"/spades/scaffolds.fasta \
     "${assemblies}"/"${prefix}"_spades.fasta
 
 genome="${assemblies}"/"${prefix}"_spades.fasta
+
+run_blast "$genome"
+
+#inspect manually blast output
+#Remove low coverage or short contigs
 
 #Polish with pilon
 #Second round of Pilon correction
@@ -1022,16 +1080,7 @@ genome="${polished}"/"${prefix}"_pilon3.fasta
 #######################
 
 
-function remove_small_contigs ()  #I think this is done by circlator. If so remove #TODO
-{
-    # Remove contigs smaller than X bp
-    perl "${prog}"/phage_typing/removesmallscontigs.pl \
-        "$smallest_contig" \
-        "$genome" \
-        > "${genome%.fasta}"_"${smallest_contig}".fasta
 
-    genome="${genome%.fasta}"_"${smallest_contig}".fasta
-}
 
 function order_contigs ()
 {
@@ -1084,29 +1133,6 @@ fi
 #cleanup
 rm -rf "${ordered}"/refseq
 find "$ordered" -type f -name "*.sslist" -exec rm {} \;
-
-
-#################
-#               #
-#   Contig ID   #
-#               #
-#################
-
-
-blastn \
-    -db nt \
-    -query "$genome" \
-    -out "${genome%.fasta}".blastn.tsv \
-    -evalue "1e-10" \
-    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
-    -num_threads "$cpu" \
-    -max_target_seqs 1 \
-    -max_hsps 1
-
-echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
-    > "${polished}"/tmp.txt
-cat "${genome%.fasta}".blastn.tsv >> "${polished}"/tmp.txt
-mv "${polished}"/tmp.txt "${genome%.fasta}".blastn.tsv
 
 
 ######################
@@ -1225,6 +1251,13 @@ cat "${annotation}"/extra_hits.fasta | \
     sed 's/ ./\U&/'
     > "${annotation}"/extra_hits_renamed.fasta
 
+# remove duplicate entries
+cat "${annotation}"/"${sample}"/extra_hits_renamed.fasta \
+    | awk 'BEGIN {RS=">"} NR>1 {sub("\n","\t"); gsub("\n",""); print RS$0}' \
+    | sort -uk1,1 \
+    | tr "\t" "\n" \
+    > "${annotation}"/"${sample}"/extra_hits_nodup.fasta
+
 #relaunch Prokka annotation with the new positive blast hit fasta file as reference
 prokka  --outdir "$annotation" \
         --force \
@@ -1239,7 +1272,7 @@ prokka  --outdir "$annotation" \
         --centre "$centre" \
         --cpus "$cpu" \
         --rfam \
-        --proteins "${annotation}"/extra_hits_renamed.fasta \
+        --proteins "${annotation}"/extra_hits_nodup.fasta \
         "$genome"
 
 echo -e "Number of hypothetical proteins remaining after the BLAST (1e-30): $(cat "${annotation}"/"${prefix}".faa | grep -ic "hypothetical")" \
