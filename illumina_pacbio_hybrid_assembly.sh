@@ -415,7 +415,7 @@ run_centrifuge \
 
 run_centrifuge \
     "${qc}"/centrifuge/"${prefix}"_pe.tsv \
-    "${fastq}"/"${prefix}"_R1.fstq.gz \
+    "${fastq}"/"${prefix}"_R1.fastq.gz \
     "${fastq}"/"${prefix}"_R2.fastq.gz 
 
 
