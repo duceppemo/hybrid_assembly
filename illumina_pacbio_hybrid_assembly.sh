@@ -25,13 +25,13 @@ version="0.1"
 
 
 # Assembly name
-export prefix="MBWGS124"
+export prefix="MBWGS070"
 
 #Annotation
 kingdom="Bacteria"
 genus="Mycobacterium"
 species="bovis"
-strain="MBWGS124"
+strain="MBWGS070"
 gram="pos"
 locus_tag="XXX"
 centre="OLF"
@@ -40,12 +40,12 @@ centre="OLF"
 baseDir=""${HOME}"/Desktop/Mbovis_canu/"$prefix""
 
 # Pacbio reads
-filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS124/MBWGS124.filtered_subreads.fastq.gz"
-ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS124/MBWGS124.ccs.fastq.gz"
+filtered_subreads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS070/MBWGS070.filtered_subreads.fastq.gz"
+ccs_reads="/media/6tb_raid10/data/Mbovis/canada/pacbio/MBWGS070/MBWGS070.ccs.fastq.gz"
 
 # Illumina paired-end data
-r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS124_R1.fastq.gz"
-r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS124_R2.fastq.gz"
+r1="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS070_R1.fastq.gz"
+r2="/media/6tb_raid10/data/Mbovis/canada/illumina/MBWGS070_R2.fastq.gz"
 
 # Database to use for metagomic analysis of raw data (contamination)
 # db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
@@ -922,6 +922,7 @@ cat "$m" "${trimmed}"/"${prefix}"_ccs_Cleaned.fastq.gz \
     > "${corrected}"/"${prefix}"_single.fastq.gz
 
 #use merged paired-end as single-end reads
+# --keep 2 seems not to work properly. The alignement files are getting deleted.
 python3 "${prog}"/Unicycler/unicycler-runner.py \
     -1 "$mu1" \
     -2 "$mu2" \
@@ -929,13 +930,23 @@ python3 "${prog}"/Unicycler/unicycler-runner.py \
     -l "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
     -o "${assemblies}"/unicycler \
     -t "$cpu" \
-    --keep 2 \
+    --keep 3 \
     --no_correct \
+    --verbosity 2 \
     --mode normal \
     --pilon_path "${prog}"/pilon/pilon-dev.jar
 
 cp "${assemblies}"/unicycler/assembly.fasta \
     "${assemblies}"/"${prefix}"_unicycler.fasta
+
+#Furthur polish
+# python3 "${prog}"/Unicycler/unicycler_polish-runner.py \
+#     -a "${assemblies}"/unicycler/assembly.fasta \
+#     -1 "$mu1" \
+#     -2 "$mu2" \2
+#     --long_reads "${corrected}"/trimmed/"${prefix}".trimmedReads.fasta.gz \
+#     --threads "$cpu" \
+#     --pilon "${prog}"/pilon/pilon-dev.jar
 
 run_blast "${assemblies}"/"${prefix}"_unicycler.fasta
 
