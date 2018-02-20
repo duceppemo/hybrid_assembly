@@ -885,8 +885,7 @@ function Polish()
             --outdir "$polished" \
             --output "$2" \
             --changes \
-            &> >(tee "${logs}"/"${prefix}".pilon"${i}")  
-        done
+            &> >(tee "${logs}"/"${prefix}".pilon"${i}")
     fi
 }
 
