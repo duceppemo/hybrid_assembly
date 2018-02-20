@@ -873,8 +873,8 @@ function Polish()
     g1=$(basename "$genome")
     g2="${g1%.fasta}"
 
-    if [ "$3" != "map" ]; then
-        #Correct contigs using pilon based on the Illumina reads
+    if [ "$2" != "map" ]; then
+        #Correct contigs using pilon
         java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar \
             --threads "$cpu" \
             --genome "$1" \
@@ -885,7 +885,8 @@ function Polish()
             --outdir "$polished" \
             --output "$2" \
             --changes \
-            &> >(tee "${logs}"/"${g2}".pilon)
+            &> >(tee "${logs}"/"${prefix}".pilon"${i}")  
+        done
     fi
 }
 
@@ -897,9 +898,25 @@ m="${merged}"/"${prefix}"_merged.fastq.gz
 mu1="${merged}"/"${prefix}"_unmerged_1P.fastq.gz
 mu2="${merged}"/"${prefix}"_unmerged_2P.fastq.gz
 
-# 1st round of polishing
-Polish "$genome" "${prefix}"_pilon1
-genome="${polished}"/"${prefix}"_pilon1.fasta
+#do up to 10 rounds of polishing
+#stop when no more changes are detected
+for i in {1..10}; do
+    if [ "$i" -gt 1]; then
+        #check if previous polishing round made any changes
+        if [ ! -s  "${polished}"/"${prefix}"_pilon"${i}".changes ]; then
+            break  #Exit loop, no more polishing required
+        fi
+    fi
+    
+    #Correct contigs using pilon
+    Polish "$genome"
+done
+
+#Check if polishing was completed after 10 rounds
+if [ "$i" -eq 10 ] && [ -s "${polished}"/"${prefix}"_pilon"${i}".changes ]; then
+    echo -e "\nGenome can probably be polished more\n" | tee -a "${logs}"/log.txt
+fi
+
 
 # Unicycler hybrid assembly
 # output = "${assemblies}"/unicycler/assembly.fasta
@@ -982,9 +999,7 @@ run_blast "$genome"
 #Remove low coverage or short contigs
 
 #Polish with pilon
-#Second round of Pilon correction
-Polish "$genome" "${prefix}"_pilon2
-genome="${polished}"/"${prefix}"_pilon2.fasta
+Polish "$genome"
 
 
 ###################
@@ -1080,8 +1095,7 @@ else
 fi
 
 genome="${polished}"/"${prefix}"_circlator.fasta
-Polish "$genome" "${prefix}"_pilon3
-genome="${polished}"/"${prefix}"_pilon3.fasta
+Polish "$genome"
 
 
 #######################
@@ -1089,8 +1103,6 @@ genome="${polished}"/"${prefix}"_pilon3.fasta
 #   Contig ordering   #
 #                     #
 #######################
-
-
 
 
 function order_contigs ()
