@@ -900,7 +900,7 @@ mu2="${merged}"/"${prefix}"_unmerged_2P.fastq.gz
 #do up to 10 rounds of polishing
 #stop when no more changes are detected
 for i in {1..10}; do
-    if [ "$i" -gt 1]; then
+    if [ "$i" -gt 1 ]; then
         #check if previous polishing round made any changes
         if [ ! -s  "${polished}"/"${prefix}"_pilon"${i}".changes ]; then
             break  #Exit loop, no more polishing required
