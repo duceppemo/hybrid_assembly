@@ -858,21 +858,6 @@ function Polish()
 
     samtools index "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam
 
-    #Merge all bam files
-    samtools merge \
-        -@ "$cpu" \
-        - \
-        "${polished}"/"${prefix}"_merged_sorted.bam \
-        "${polished}"/"${prefix}"_unmerged_sorted.bam \
-        "${polished}"/"${prefix}"_ccs_sorted.bam \
-        "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam | \
-    samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_all.bam
-    
-    samtools index "${polished}"/"${prefix}"_all.bam
-
-    g1=$(basename "$genome")
-    g2="${g1%.fasta}"
-
     if [ "$2" != "map" ]; then
         #Correct contigs using pilon
         java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar \
@@ -883,10 +868,27 @@ function Polish()
             --unpaired "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam \
             --frags "${polished}"/"${prefix}"_unmerged_sorted.bam \
             --outdir "$polished" \
-            --output "$2" \
+            --output "${prefix}"_pilon"${i}" \
             --changes \
             &> >(tee "${logs}"/"${prefix}".pilon"${i}")
+
+        #remove "_pilon" from contig names
+        sed -i 's/_pilon//g' "${polished}"/"${prefix}"_pilon"${i}".fasta
+    else
+        #Merge all bam files
+        samtools merge \
+            -@ "$cpu" \
+            - \
+            "${polished}"/"${prefix}"_merged_sorted.bam \
+            "${polished}"/"${prefix}"_unmerged_sorted.bam \
+            "${polished}"/"${prefix}"_ccs_sorted.bam \
+            "${polished}"/"${prefix}"_subreads_Corrected_sorted.bam | \
+        samtools sort -@ "$cpu" -m 10G -o "${polished}"/"${prefix}"_all.bam
+        
+        samtools index "${polished}"/"${prefix}"_all.bam
     fi
+
+    genome="${polished}"/"${prefix}"_pilon"${i}".fasta
 }
 
 # Illumina reads to use for polishing
@@ -902,7 +904,7 @@ mu2="${merged}"/"${prefix}"_unmerged_2P.fastq.gz
 for i in {1..10}; do
     if [ "$i" -gt 1 ]; then
         #check if previous polishing round made any changes
-        if [ ! -s  "${polished}"/"${prefix}"_pilon"${i}".changes ]; then
+        if [ ! -s  "${polished}"/"${prefix}"_pilon"$((i-1))".changes ]; then
             break  #Exit loop, no more polishing required
         fi
     fi
